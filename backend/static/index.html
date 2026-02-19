@@ -1,0 +1,116 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Passenger Cart Call</title>
+  <style>
+    body { font-family: system-ui, Arial; margin: 24px; max-width: 520px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+    label { display:block; margin-top: 10px; font-weight: 600; }
+    input { width: 100%; padding: 10px; border-radius: 10px; border: 1px solid #ccc; font-size: 16px; }
+    button { padding: 12px 14px; border-radius: 12px; border: 0; font-size: 16px; cursor: pointer; width: 100%; margin-top: 12px; }
+    pre { background: #f7f7f7; padding: 12px; border-radius: 12px; overflow:auto; }
+    .status { font-weight: 700; }
+    .row { display:flex; gap:10px; }
+    .row > div { flex:1; }
+  </style>
+</head>
+<body>
+  <h2>Call the Delivery Cart</h2>
+
+  <div class="card">
+    <label>Seat Number</label>
+    <input id="seat" placeholder="e.g., 12B" />
+
+    <button id="callBtn">Call Cart</button>
+    <button id="stopBtn">STOP (Emergency)</button>
+
+    <p class="status">Last status: <span id="lastStatus">—</span></p>
+    <pre id="log"></pre>
+  </div>
+
+  <div class="card">
+    <h3>Settings (crew/demo)</h3>
+
+    <div class="row">
+      <div>
+        <label>Seat spacing (cm)</label>
+        <input id="spacing" type="number" step="0.1" />
+      </div>
+      <div>
+        <label>Home row</label>
+        <input id="homeRow" type="number" step="1" />
+      </div>
+    </div>
+
+    <button id="saveBtn">Save Settings</button>
+  </div>
+
+<script>
+const logEl = document.getElementById("log");
+const lastStatusEl = document.getElementById("lastStatus");
+
+function log(msg) {
+  const t = new Date().toLocaleTimeString();
+  logEl.textContent = `[${t}] ${msg}\n` + logEl.textContent;
+}
+
+async function loadConfig() {
+  const r = await fetch("/api/config");
+  const cfg = await r.json();
+  document.getElementById("spacing").value = cfg.seat_spacing_cm;
+  document.getElementById("homeRow").value = cfg.home_row;
+  lastStatusEl.textContent = cfg.last_status ?? "—";
+  log(`Config loaded. Serial port: ${cfg.serial_port || "(auto)"} @ ${cfg.baud}`);
+}
+loadConfig();
+
+document.getElementById("saveBtn").onclick = async () => {
+  const seat_spacing_cm = parseFloat(document.getElementById("spacing").value);
+  const home_row = parseInt(document.getElementById("homeRow").value, 10);
+  const r = await fetch("/api/config", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({seat_spacing_cm, home_row})
+  });
+  const out = await r.json();
+  log(`Saved: spacing=${out.seat_spacing_cm}cm, home_row=${out.home_row}`);
+};
+
+document.getElementById("callBtn").onclick = async () => {
+  const seat = document.getElementById("seat").value.trim();
+  if (!seat) return alert("Enter a seat number (e.g., 12B).");
+  const r = await fetch("/api/call", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({seat})
+  });
+  const out = await r.json();
+  log(`CALL seat=${out.seat} -> distance=${out.distance_cm.toFixed(1)} cm`);
+};
+
+document.getElementById("stopBtn").onclick = async () => {
+  await fetch("/api/stop", { method: "POST" });
+  log("STOP sent.");
+};
+
+// Live Arduino messages via WebSocket
+let ws;
+function connectWS() {
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = () => log("WS connected");
+  ws.onmessage = (ev) => {
+    const msg = ev.data;
+    lastStatusEl.textContent = msg;
+    log(`Arduino: ${msg}`);
+  };
+  ws.onclose = () => setTimeout(connectWS, 1000);
+}
+connectWS();
+
+// keepalive
+setInterval(() => { if (ws && ws.readyState === 1) ws.send("ping"); }, 2000);
+</script>
+</body>
+</html>
