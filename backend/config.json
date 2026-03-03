@@ -1,0 +1,6 @@
+{
+  "seat_spacing_cm": 80.0,
+  "home_row": 1,
+  "serial_port": "COM4",
+  "baud": 9600
+}

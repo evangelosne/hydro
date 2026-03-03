@@ -10,7 +10,7 @@ CONFIG_PATH = "config.json"
 DEFAULT_CONFIG = {
     "seat_spacing_cm": 80.0,     # user-editable in UI
     "home_row": 1,               # where the cart starts (row number)
-    "serial_port": "",           # auto-detect if empty
+    "serial_port": "COM4",           # auto-detect if empty
     "baud": 9600
 }
 
@@ -40,7 +40,7 @@ def auto_detect_port() -> str:
 
 class SerialManager:
     def __init__(self):
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.ser = None
         self.last_status = "DISCONNECTED"
 
