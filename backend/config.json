@@ -1,8 +1,9 @@
 {
   "row_spacing_cm": 60.96,
-  "current_row": 15,
+  "current_row": 1,
+  "home_row": 1,
   "pwm": 170,
-  "cm_per_sec": 20.0,
-  "serial_port": "COM4",
+  "cm_per_sec": 12.2,
+  "serial_port": "COM3",
   "baud": 9600
 }
