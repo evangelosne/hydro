@@ -6,21 +6,26 @@ import json, time, threading
 import serial
 import serial.tools.list_ports
 
-CONFIG_PATH = "config.json"
+CONFIG_PATH = "bluetooth_config.json"
 
 DEFAULT_CONFIG = {
     # Row / distance configuration
     "row_spacing_cm": 60.96,
     "current_row": 2,
-    "home_row": 1,          # galley / home base row
+    "home_row": 1,
 
     # Time-based calibration
     "pwm": 170,
     "cm_per_sec": 45.0,
 
-    # Serial
-    "serial_port": "COM4",  # leave "" to auto-detect
-    "baud": 9600
+    # Serial / Bluetooth
+    # Set this to the HC-05 Bluetooth COM port that Windows creates after pairing.
+    # Leave blank to auto-detect a Bluetooth serial port.
+    "serial_port": "",
+    "baud": 9600,
+
+    # If true, prefer Bluetooth-style COM ports in auto-detect.
+    "prefer_bluetooth": True,
 }
 
 
@@ -28,10 +33,10 @@ def load_config():
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
-            merged = {**DEFAULT_CONFIG, **data}
-            return merged
+            return {**DEFAULT_CONFIG, **data}
     except Exception:
         return DEFAULT_CONFIG.copy()
+
 
 
 def save_config(cfg):
@@ -40,26 +45,67 @@ def save_config(cfg):
 
 
 cfg = load_config()
-
-# Tracks the final row after the full round-trip is completed
 pending_final_row = None
+
+
+
+def score_port(port_info, prefer_bluetooth=True):
+    desc = (port_info.description or "").lower()
+    hwid = (port_info.hwid or "").lower()
+    manu = (getattr(port_info, "manufacturer", "") or "").lower()
+    prod = (getattr(port_info, "product", "") or "").lower()
+    dev = (port_info.device or "").lower()
+
+    score = 0
+
+    # Strong hints that Windows created this COM port from Bluetooth SPP
+    bluetooth_markers = [
+        "standard serial over bluetooth",
+        "bluetooth",
+        "bthmodem",
+        "bthenum",
+        "rfcomm",
+    ]
+    if any(x in desc for x in bluetooth_markers):
+        score += 120
+    if any(x in hwid for x in bluetooth_markers):
+        score += 120
+    if any(x in manu for x in bluetooth_markers):
+        score += 80
+    if any(x in prod for x in bluetooth_markers):
+        score += 80
+
+    # Legacy USB Arduino hints as fallback only
+    usb_markers = ["arduino", "wch", "usb serial", "cp210", "ch340"]
+    if any(x in desc for x in usb_markers):
+        score += 25
+    if "usb" in hwid:
+        score += 20
+    if "acm" in dev:
+        score += 20
+
+    if prefer_bluetooth and score >= 120:
+        score += 50
+
+    return score
+
 
 
 def auto_detect_port() -> str:
     ports = list(serial.tools.list_ports.comports())
-    for p in ports:
-        desc = (p.description or "").lower()
-        hwid = (p.hwid or "").lower()
-        dev = (p.device or "").lower()
-        if (
-            ("arduino" in desc)
-            or ("wch" in desc)
-            or ("usb serial" in desc)
-            or ("acm" in dev)
-            or ("usb" in hwid)
-        ):
-            return p.device
-    return ports[0].device if ports else ""
+    if not ports:
+        return ""
+
+    prefer_bluetooth = bool(cfg.get("prefer_bluetooth", True))
+    ranked = sorted(ports, key=lambda p: score_port(p, prefer_bluetooth), reverse=True)
+    best = ranked[0]
+
+    # Only trust auto-detect if there is at least some useful signal.
+    if score_port(best, prefer_bluetooth) > 0:
+        return best.device
+
+    return ports[0].device
+
 
 
 def clamp_int(x, lo, hi):
@@ -80,13 +126,17 @@ class SerialManager:
 
             port = (cfg.get("serial_port") or "").strip() or auto_detect_port()
             if not port:
-                raise RuntimeError("No serial port found. Plug in Arduino and try again.")
+                raise RuntimeError(
+                    "No serial/Bluetooth COM port found. Pair HC-05 to Windows first, "
+                    "then set bluetooth_config.json serial_port to that COM port."
+                )
 
             cfg["serial_port"] = port
             save_config(cfg)
 
             self.ser = serial.Serial(port, int(cfg["baud"]), timeout=1)
-            time.sleep(2)  # allow Arduino reset
+            # Bluetooth SPP does not reset the Uno like USB often does, so keep this short.
+            time.sleep(0.5)
             self.last_status = f"CONNECTED {port}"
 
     def send_line(self, line: str):
@@ -108,6 +158,7 @@ class SerialManager:
 
 serial_mgr = SerialManager()
 ws_clients = set()
+
 
 
 def serial_reader_loop():
@@ -150,10 +201,6 @@ def root():
         return HTMLResponse(f.read())
 
 
-# -------------------------
-# Config API
-# -------------------------
-
 class ConfigUpdate(BaseModel):
     row_spacing_cm: float
     current_row: int
@@ -172,7 +219,8 @@ def get_config():
         "cm_per_sec": cfg.get("cm_per_sec", 45.0),
         "serial_port": cfg.get("serial_port", ""),
         "baud": cfg.get("baud", 9600),
-        "last_status": serial_mgr.last_status
+        "prefer_bluetooth": cfg.get("prefer_bluetooth", True),
+        "last_status": serial_mgr.last_status,
     }
 
 
@@ -186,10 +234,6 @@ def update_config(body: ConfigUpdate):
     save_config(cfg)
     return {"ok": True, **cfg}
 
-
-# -------------------------
-# Row movement API
-# -------------------------
 
 class GotoRowRequest(BaseModel):
     target_row: int
@@ -220,19 +264,10 @@ def goto_row(req: GotoRowRequest):
     direction_out = "F" if delta_rows_out > 0 else "B"
     direction_back = "F" if delta_rows_back > 0 else "B"
 
-    # If already at target, still do 10s stop and return home unless already at home too
     if target == current and target == home_row:
         serial_mgr.send_line("STOP")
-        return {
-            "ok": True,
-            "msg": "Already at target and home row",
-            "current_row": current
-        }
+        return {"ok": True, "msg": "Already at target and home row", "current_row": current}
 
-    # Command format:
-    # TRIP <out_dir> <pwm> <out_ms> <pause_ms> <back_dir> <back_ms>
-    # Example:
-    # TRIP F 170 3000 10000 B 3000
     pause_ms = 10000
     pending_final_row = home_row
     serial_mgr.send_line(
@@ -251,7 +286,7 @@ def goto_row(req: GotoRowRequest):
         "back_direction": direction_back,
         "back_distance_cm": distance_back_cm,
         "back_duration_ms": duration_back_ms,
-        "pwm": pwm
+        "pwm": pwm,
     }
 
 
@@ -262,10 +297,6 @@ def stop_cart():
     serial_mgr.send_line("STOP")
     return {"ok": True}
 
-
-# -------------------------
-# WebSocket for serial logs
-# -------------------------
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):

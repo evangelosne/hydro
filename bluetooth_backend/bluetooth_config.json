@@ -4,6 +4,7 @@
   "home_row": 1,
   "pwm": 170,
   "cm_per_sec": 12.2,
-  "serial_port": "COM4",
-  "baud": 9600
+  "serial_port": "COM5",
+  "baud": 9600,
+  "prefer_bluetooth": true
 }
