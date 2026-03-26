@@ -3,73 +3,688 @@
 <head>
   <meta charset="utf-8" />
   <title>Robot Row Control</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
   <style>
-    body { font-family: Arial, sans-serif; margin: 24px; max-width: 720px; }
-    .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
-    label { display:block; margin-top: 10px; }
-    input { padding: 8px; width: 200px; }
-    button { padding: 10px 14px; margin-top: 12px; cursor: pointer; }
-    #log { background: #111; color: #0f0; padding: 10px; height: 160px; overflow:auto; border-radius: 8px; }
-    .row { display:flex; gap: 12px; flex-wrap: wrap; }
-    .small { color:#666; font-size: 12px; }
+    :root {
+      --bg: #f0f4f8;
+      --surface: #ffffff;
+      --surface2: #e8eef5;
+      --border: #d0dce8;
+      --accent: #1a7aff;
+      --accent2: #00c48c;
+      --warn: #ff9500;
+      --danger: #ff3b30;
+      --text: #1a2332;
+      --muted: #6b7f96;
+      --mono: 'Space Mono', monospace;
+      --sans: 'DM Sans', sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 0;
+    }
+
+    /* ── TOP NAV ── */
+    .topbar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .topbar-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .topbar-logo {
+      width: 32px; height: 32px;
+      background: var(--accent);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+    }
+    .topbar-title {
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      line-height: 1.2;
+    }
+    .topbar-sub {
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .topbar-pills {
+      display: flex;
+      gap: 8px;
+    }
+    .pill {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      padding: 5px 10px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--muted);
+    }
+    .pill.green { background: #e6f9f3; border-color: #a3e6d0; color: #00a070; }
+    .pill.blue  { background: #e6f0ff; border-color: #a3c4ff; color: #1a7aff; }
+
+    /* ── LAYOUT ── */
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      gap: 20px;
+      padding: 24px 32px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .left-col { display: flex; flex-direction: column; gap: 16px; }
+    .right-col { display: flex; flex-direction: column; gap: 16px; }
+
+    /* ── HERO BANNER ── */
+    .hero {
+      background: linear-gradient(135deg, #1a2332 0%, #1e3a5f 100%);
+      border-radius: 16px;
+      padding: 28px 32px;
+      color: white;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -40px; right: -40px;
+      width: 200px; height: 200px;
+      background: radial-gradient(circle, rgba(26,122,255,0.25) 0%, transparent 70%);
+      border-radius: 50%;
+    }
+    .hero-eyebrow {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.5);
+      margin-bottom: 10px;
+    }
+    .hero-eyebrow span { color: var(--accent2); }
+    .hero h1 {
+      font-family: var(--mono);
+      font-size: 26px;
+      font-weight: 700;
+      line-height: 1.2;
+      margin-bottom: 8px;
+    }
+    .hero h1 em { color: #5ba8ff; font-style: normal; }
+    .hero p {
+      font-size: 14px;
+      color: rgba(255,255,255,0.65);
+      max-width: 480px;
+      line-height: 1.6;
+    }
+
+    /* ── CARD ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px 24px;
+    }
+    .card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 18px;
+    }
+    .card-title {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    /* ── CONFIG GRID ── */
+    .config-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .field input {
+      font-family: var(--mono);
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+      background: var(--surface2);
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      outline: none;
+      transition: border-color 0.15s;
+      width: 100%;
+    }
+    .field input:focus {
+      border-color: var(--accent);
+      background: #f0f6ff;
+    }
+
+    /* ── BUTTONS ── */
+    .btn {
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      padding: 11px 20px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      transition: transform 0.1s, opacity 0.15s;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+    }
+    .btn-primary:hover { opacity: 0.9; }
+    .btn-success {
+      background: var(--accent2);
+      color: white;
+      flex: 1;
+      font-size: 13px;
+      padding: 13px;
+    }
+    .btn-danger {
+      background: var(--danger);
+      color: white;
+      flex: 1;
+      font-size: 13px;
+      padding: 13px;
+    }
+    .btn-row { display: flex; gap: 10px; margin-top: 4px; }
+
+    /* ── STATUS BADGE ── */
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 14px;
+      padding: 10px 14px;
+      background: var(--surface2);
+      border-radius: 8px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .status-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--muted);
+      flex-shrink: 0;
+    }
+    .status-dot.live {
+      background: var(--accent2);
+      box-shadow: 0 0 0 3px rgba(0,196,140,0.2);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%,100% { box-shadow: 0 0 0 3px rgba(0,196,140,0.2); }
+      50%      { box-shadow: 0 0 0 6px rgba(0,196,140,0.05); }
+    }
+    #statusText { color: var(--text); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* ── GOTO ROW ── */
+    .goto-row-input {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      margin-bottom: 14px;
+    }
+    .goto-row-input input {
+      font-family: var(--mono);
+      font-size: 36px;
+      font-weight: 700;
+      text-align: center;
+      width: 120px;
+      border: 2px solid var(--border);
+      border-right: none;
+      border-radius: 10px 0 0 10px;
+      padding: 14px;
+      background: var(--surface2);
+      outline: none;
+      color: var(--text);
+      transition: border-color 0.15s;
+    }
+    .goto-row-input input:focus { border-color: var(--accent); }
+    .goto-stepper {
+      display: flex;
+      flex-direction: column;
+    }
+    .goto-stepper button {
+      font-family: var(--mono);
+      font-size: 16px;
+      width: 44px;
+      height: 38px;
+      border: 2px solid var(--border);
+      border-left: none;
+      background: var(--surface2);
+      cursor: pointer;
+      color: var(--text);
+      transition: background 0.1s;
+    }
+    .goto-stepper button:first-child { border-radius: 0 10px 0 0; border-bottom: 1px solid var(--border); }
+    .goto-stepper button:last-child  { border-radius: 0 0 10px 0; border-top: none; }
+    .goto-stepper button:hover { background: #dce6f0; }
+
+    .result-block {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      background: var(--surface2);
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin-top: 12px;
+      min-height: 42px;
+      line-height: 1.7;
+      word-break: break-all;
+    }
+
+    /* ── TELEMETRY ── */
+    .telem-card {
+      background: #1a2332;
+      border: none;
+      color: white;
+    }
+    .telem-card .card-title { color: rgba(255,255,255,0.45); }
+    .telem-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .telem-row:last-child { margin-bottom: 0; }
+    .telem-label {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.5);
+      width: 90px;
+      flex-shrink: 0;
+    }
+    .telem-bar-wrap {
+      flex: 1;
+      background: rgba(255,255,255,0.08);
+      border-radius: 4px;
+      height: 7px;
+      overflow: hidden;
+    }
+    .telem-bar {
+      height: 100%;
+      border-radius: 4px;
+      background: var(--accent);
+      transition: width 0.5s ease;
+    }
+    .telem-bar.orange { background: var(--warn); }
+    .telem-bar.green  { background: var(--accent2); }
+    .telem-val {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 700;
+      color: white;
+      width: 40px;
+      text-align: right;
+    }
+
+    /* ── ROBOT VIZ ── */
+    .robot-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .robot-track {
+      width: 100%;
+      height: 80px;
+      background: var(--surface2);
+      border-radius: 10px;
+      position: relative;
+      margin: 12px 0;
+      overflow: hidden;
+    }
+    .track-lines {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      display: flex;
+      align-items: center;
+    }
+    .track-line {
+      height: 2px;
+      flex: 1;
+      background: repeating-linear-gradient(to right, var(--border) 0, var(--border) 6px, transparent 6px, transparent 12px);
+    }
+    .robot-marker {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 28px;
+      transition: left 0.6s cubic-bezier(.4,0,.2,1);
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.15));
+    }
+    .robot-dest {
+      position: absolute;
+      top: 4px;
+      font-family: var(--mono);
+      font-size: 9px;
+      color: var(--accent);
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      transition: left 0.6s cubic-bezier(.4,0,.2,1);
+    }
+    .robot-info {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 4px;
+    }
+    .robot-info-item {
+      text-align: center;
+    }
+    .robot-info-val {
+      font-family: var(--mono);
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .robot-info-lbl {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    /* ── LOG ── */
+    .log-card { }
+    #log {
+      background: #0e1520;
+      color: #7fc8a9;
+      font-family: var(--mono);
+      font-size: 11px;
+      line-height: 1.7;
+      padding: 12px 14px;
+      height: 180px;
+      overflow-y: auto;
+      border-radius: 8px;
+      margin-top: 4px;
+    }
+    #log::-webkit-scrollbar { width: 4px; }
+    #log::-webkit-scrollbar-track { background: transparent; }
+    #log::-webkit-scrollbar-thumb { background: #2a3a50; border-radius: 2px; }
+
+    /* ── BADGES ── */
+    .badge-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+    .badge {
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      padding: 4px 8px;
+      border-radius: 20px;
+      text-transform: uppercase;
+    }
+    .badge-blue  { background: #e6f0ff; color: #1a7aff; }
+    .badge-green { background: #e6f9f3; color: #00a070; }
+    .badge-gray  { background: var(--surface2); color: var(--muted); }
   </style>
 </head>
 <body>
-  <h2>Robot Row Control (Forward/Backward)</h2>
 
-  <div class="card">
-    <h3>Config</h3>
-
-    <div class="row">
+  <div class="topbar">
+    <div class="topbar-brand">
+      <div class="topbar-logo">🤖</div>
       <div>
-        <label>Row spacing (cm)</label>
-        <input id="rowSpacing" type="number" step="0.01" />
-      </div>
-
-      <div>
-        <label>Current row</label>
-        <input id="currentRow" type="number" step="1" />
-      </div>
-
-      <div>
-        <label>PWM (0–255)</label>
-        <input id="pwm" type="number" step="1" />
-      </div>
-
-      <div>
-        <label>cm/sec (calibration)</label>
-        <input id="cmPerSec" type="number" step="0.1" />
+        <div class="topbar-title">ROWBOT // CONTROL</div>
+        <div class="topbar-sub">autonomous row delivery system</div>
       </div>
     </div>
-
-    <button onclick="saveConfig()">Save Config</button>
-    <div class="small" id="statusLine">Status: —</div>
+    <div class="topbar-pills">
+      <div class="pill green" id="connPill">● CONNECTING</div>
+      <div class="pill blue">BT SERIAL</div>
+    </div>
   </div>
 
-  <div class="card">
-    <h3>Go to Row</h3>
-    <label>Target row</label>
-    <input id="targetRow" type="number" step="1" />
-    <br />
-    <button onclick="gotoRow()">GO</button>
-    <button onclick="stopNow()">STOP</button>
-    <div class="small" id="resultLine">Result: —</div>
-  </div>
+  <div class="layout">
+    <!-- LEFT COLUMN -->
+    <div class="left-col">
 
-  <div class="card">
-    <h3>Arduino Log</h3>
-    <pre id="log"></pre>
+      <!-- HERO -->
+      <div class="hero">
+        <div class="hero-eyebrow">bluetooth serial · row navigation · <span>autonomous bot</span></div>
+        <h1>Meet <em>RowBot</em>, your<br/>autonomous cart.</h1>
+        <p>Send the cart to any row and it returns home automatically. Monitor speed, position, and connection status in real time.</p>
+        <div class="badge-row" style="margin-top:14px;">
+          <span class="badge" style="background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);" id="portBadge">PORT: —</span>
+          <span class="badge" style="background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);" id="baudBadge">BAUD: 9600</span>
+        </div>
+      </div>
+
+      <!-- CONFIG -->
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">Configuration</span>
+          <button class="btn btn-primary" onclick="saveConfig()">Save Changes</button>
+        </div>
+        <div class="config-grid">
+          <div class="field">
+            <label>Row Spacing (cm)</label>
+            <input id="rowSpacing" type="number" step="0.01" />
+          </div>
+          <div class="field">
+            <label>Current Row</label>
+            <input id="currentRow" type="number" step="1" />
+          </div>
+          <div class="field">
+            <label>PWM (0–255)</label>
+            <input id="pwm" type="number" step="1" />
+          </div>
+          <div class="field">
+            <label>cm/sec (calibration)</label>
+            <input id="cmPerSec" type="number" step="0.1" />
+          </div>
+        </div>
+        <div class="status-bar">
+          <div class="status-dot" id="statusDot"></div>
+          <span id="statusText">Loading...</span>
+        </div>
+      </div>
+
+      <!-- GOTO ROW -->
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">Go to Row</span>
+        </div>
+
+        <div style="display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap;">
+          <div>
+            <div style="font-size:11px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Target Row</div>
+            <div class="goto-row-input">
+              <input id="targetRow" type="number" step="1" value="1" />
+              <div class="goto-stepper">
+                <button onclick="stepRow(1)">▲</button>
+                <button onclick="stepRow(-1)">▼</button>
+              </div>
+            </div>
+          </div>
+          <div class="btn-row" style="flex:1; min-width:200px; margin-bottom:0;">
+            <button class="btn btn-success" onclick="gotoRow()">🚀 LAUNCH</button>
+            <button class="btn btn-danger" onclick="stopNow()">⛔ STOP</button>
+          </div>
+        </div>
+
+        <div class="result-block" id="resultLine">Awaiting command...</div>
+      </div>
+
+    </div>
+
+    <!-- RIGHT COLUMN -->
+    <div class="right-col">
+
+      <!-- TELEMETRY -->
+      <div class="card telem-card">
+        <div class="card-head">
+          <span class="card-title">Telemetry</span>
+          <span style="font-family:var(--mono);font-size:10px;color:rgba(255,255,255,0.35);" id="telemSub">ROWBOT-01</span>
+        </div>
+        <div class="telem-row">
+          <span class="telem-label">PWM</span>
+          <div class="telem-bar-wrap"><div class="telem-bar orange" id="barPwm" style="width:0%"></div></div>
+          <span class="telem-val" id="valPwm">—</span>
+        </div>
+        <div class="telem-row">
+          <span class="telem-label">Speed</span>
+          <div class="telem-bar-wrap"><div class="telem-bar" id="barSpeed" style="width:0%"></div></div>
+          <span class="telem-val" id="valSpeed">—</span>
+        </div>
+        <div class="telem-row">
+          <span class="telem-label">Spacing</span>
+          <div class="telem-bar-wrap"><div class="telem-bar green" id="barSpacing" style="width:0%"></div></div>
+          <span class="telem-val" id="valSpacing">—</span>
+        </div>
+        <div class="badge-row" style="margin-top:14px;">
+          <span class="badge badge-green" id="badgeConn">DISCONNECTED</span>
+          <span class="badge badge-blue">AUTO MODE</span>
+          <span class="badge badge-gray" id="badgeHome">HOME: —</span>
+        </div>
+      </div>
+
+      <!-- ROBOT VIZ -->
+      <div class="robot-panel">
+        <div class="card-title" style="text-align:left; margin-bottom:8px;">Row Position</div>
+        <div class="robot-track">
+          <div class="track-lines"><div class="track-line"></div></div>
+          <div class="robot-dest" id="robotDest" style="left:5px;">TARGET —</div>
+          <div class="robot-marker" id="robotMarker" style="left:5%">🤖</div>
+        </div>
+        <div class="robot-info">
+          <div class="robot-info-item">
+            <div class="robot-info-val" id="infoCurrentRow">—</div>
+            <div class="robot-info-lbl">Current Row</div>
+          </div>
+          <div class="robot-info-item">
+            <div class="robot-info-val" style="color:var(--accent);" id="infoTarget">—</div>
+            <div class="robot-info-lbl">Target Row</div>
+          </div>
+          <div class="robot-info-item">
+            <div class="robot-info-val" style="color:var(--accent2);" id="infoHome">—</div>
+            <div class="robot-info-lbl">Home Row</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- LOG -->
+      <div class="card log-card">
+        <div class="card-head">
+          <span class="card-title">Serial Log</span>
+          <button class="btn" style="font-size:10px;padding:5px 10px;background:var(--surface2);color:var(--muted);" onclick="clearLog()">Clear</button>
+        </div>
+        <pre id="log"></pre>
+      </div>
+
+    </div>
   </div>
 
 <script>
-const logEl = document.getElementById("log");
-const statusLine = document.getElementById("statusLine");
-const resultLine = document.getElementById("resultLine");
+const logEl     = document.getElementById("log");
+const statusText = document.getElementById("statusText");
+const statusDot  = document.getElementById("statusDot");
+
+let maxRows = 20; // used for robot position visualization
 
 function log(msg) {
   const t = new Date().toLocaleTimeString();
   logEl.textContent += `[${t}] ${msg}\n`;
   logEl.scrollTop = logEl.scrollHeight;
+}
+function clearLog() { logEl.textContent = ''; }
+
+function updateTelemetry(cfg) {
+  // bars
+  const pwmPct = ((cfg.pwm || 0) / 255 * 100).toFixed(1);
+  const speedPct = Math.min(100, (cfg.cm_per_sec || 0) / 100 * 100).toFixed(1);
+  const spacingPct = Math.min(100, (cfg.row_spacing_cm || 0) / 200 * 100).toFixed(1);
+
+  document.getElementById("barPwm").style.width = pwmPct + '%';
+  document.getElementById("barSpeed").style.width = speedPct + '%';
+  document.getElementById("barSpacing").style.width = spacingPct + '%';
+
+  document.getElementById("valPwm").textContent = cfg.pwm ?? '—';
+  document.getElementById("valSpeed").textContent = (cfg.cm_per_sec ?? '—') + '';
+  document.getElementById("valSpacing").textContent = (cfg.row_spacing_cm ?? '—') + '';
+
+  // badges
+  document.getElementById("telemSub").textContent = `ROWBOT-01 · port ${cfg.serial_port || 'auto'} · ${cfg.baud}bd`;
+  document.getElementById("portBadge").textContent = `PORT: ${cfg.serial_port || 'AUTO'}`;
+  document.getElementById("baudBadge").textContent = `BAUD: ${cfg.baud}`;
+  document.getElementById("badgeHome").textContent = `HOME: ROW ${cfg.home_row ?? '?'}`;
+  document.getElementById("infoCurrentRow").textContent = cfg.current_row ?? '—';
+  document.getElementById("infoHome").textContent = cfg.home_row ?? '—';
+
+  // robot viz
+  updateRobotViz(cfg.current_row, null, cfg.home_row);
+
+  // status
+  const status = cfg.last_status || 'UNKNOWN';
+  statusText.textContent = status + (cfg.serial_port ? ` (${cfg.serial_port})` : '');
+  const isConn = status.startsWith('CONNECTED');
+  statusDot.classList.toggle('live', isConn);
+  document.getElementById("connPill").textContent = isConn ? '● CONNECTED' : '● OFFLINE';
+  document.getElementById("connPill").className = 'pill ' + (isConn ? 'green' : '');
+  document.getElementById("badgeConn").textContent = isConn ? 'CONNECTED' : 'DISCONNECTED';
+  document.getElementById("badgeConn").className = 'badge ' + (isConn ? 'badge-green' : 'badge-gray');
+}
+
+function updateRobotViz(current, target, home) {
+  const marker = document.getElementById("robotMarker");
+  const dest   = document.getElementById("robotDest");
+  if (target !== null && target !== undefined) {
+    document.getElementById("infoTarget").textContent = target;
+  }
+  // position as % of track (rows 1..maxRows)
+  const pct = r => Math.max(3, Math.min(90, ((r - 1) / Math.max(maxRows - 1, 1)) * 88 + 3));
+  marker.style.left = pct(current || 1) + '%';
+  if (target !== null && target !== undefined) {
+    dest.style.left = pct(target) + '%';
+    dest.textContent = `→ ROW ${target}`;
+  }
 }
 
 async function loadConfig() {
@@ -79,7 +694,7 @@ async function loadConfig() {
   document.getElementById("currentRow").value = cfg.current_row;
   document.getElementById("pwm").value = cfg.pwm;
   document.getElementById("cmPerSec").value = cfg.cm_per_sec;
-  statusLine.textContent = `Status: ${cfg.last_status} (port=${cfg.serial_port || "auto"})`;
+  updateTelemetry(cfg);
 }
 
 async function saveConfig() {
@@ -89,37 +704,47 @@ async function saveConfig() {
     pwm: parseInt(document.getElementById("pwm").value, 10),
     cm_per_sec: parseFloat(document.getElementById("cmPerSec").value)
   };
-
   const r = await fetch("/api/config", {
     method: "POST",
     headers: {"Content-Type":"application/json"},
     body: JSON.stringify(body)
   });
   const out = await r.json();
-  log("Saved config: " + JSON.stringify(out));
+  log("Config saved: " + JSON.stringify(out));
   await loadConfig();
 }
 
 async function gotoRow() {
   const target_row = parseInt(document.getElementById("targetRow").value, 10);
+  updateRobotViz(
+    parseInt(document.getElementById("currentRow").value, 10),
+    target_row,
+    null
+  );
   const r = await fetch("/api/goto_row", {
     method: "POST",
     headers: {"Content-Type":"application/json"},
     body: JSON.stringify({ target_row })
   });
   const out = await r.json();
-  log("GO: " + JSON.stringify(out));
-  resultLine.textContent = "Result: " + JSON.stringify(out);
-
-  // Update current row field to match backend state
+  log("GO → row " + target_row + ": " + JSON.stringify(out));
+  document.getElementById("resultLine").textContent =
+    out.ok
+      ? `Row ${out.from_row} → ${out.target_row} · ${out.out_distance_cm?.toFixed(1)}cm · ${out.out_duration_ms}ms · returning home after ${out.pause_ms}ms`
+      : JSON.stringify(out);
   await loadConfig();
 }
 
 async function stopNow() {
   const r = await fetch("/api/stop", { method: "POST" });
   const out = await r.json();
-  log("STOP: " + JSON.stringify(out));
-  resultLine.textContent = "Result: STOP sent";
+  log("STOP sent: " + JSON.stringify(out));
+  document.getElementById("resultLine").textContent = "⛔ STOP command sent.";
+}
+
+function stepRow(delta) {
+  const el = document.getElementById("targetRow");
+  el.value = Math.max(1, (parseInt(el.value, 10) || 1) + delta);
 }
 
 (function connectWS() {
@@ -127,10 +752,13 @@ async function stopNow() {
   ws.onopen = () => log("WS connected");
   ws.onmessage = (e) => {
     log("SERIAL: " + e.data);
-    statusLine.textContent = `Status: ${e.data}`;
+    statusText.textContent = e.data;
+    const isConn = e.data.startsWith('CONNECTED');
+    statusDot.classList.toggle('live', isConn || e.data === 'WS_CONNECTED');
   };
   ws.onclose = () => {
-    log("WS closed, reconnecting...");
+    log("WS disconnected — retrying...");
+    statusDot.classList.remove('live');
     setTimeout(connectWS, 800);
   };
 })();

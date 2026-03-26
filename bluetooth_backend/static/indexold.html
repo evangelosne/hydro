@@ -1,0 +1,141 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Robot Row Control</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; max-width: 720px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+    label { display:block; margin-top: 10px; }
+    input { padding: 8px; width: 200px; }
+    button { padding: 10px 14px; margin-top: 12px; cursor: pointer; }
+    #log { background: #111; color: #0f0; padding: 10px; height: 160px; overflow:auto; border-radius: 8px; }
+    .row { display:flex; gap: 12px; flex-wrap: wrap; }
+    .small { color:#666; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h2>Robot Row Control (Forward/Backward)</h2>
+
+  <div class="card">
+    <h3>Config</h3>
+
+    <div class="row">
+      <div>
+        <label>Row spacing (cm)</label>
+        <input id="rowSpacing" type="number" step="0.01" />
+      </div>
+
+      <div>
+        <label>Current row</label>
+        <input id="currentRow" type="number" step="1" />
+      </div>
+
+      <div>
+        <label>PWM (0–255)</label>
+        <input id="pwm" type="number" step="1" />
+      </div>
+
+      <div>
+        <label>cm/sec (calibration)</label>
+        <input id="cmPerSec" type="number" step="0.1" />
+      </div>
+    </div>
+
+    <button onclick="saveConfig()">Save Config</button>
+    <div class="small" id="statusLine">Status: —</div>
+  </div>
+
+  <div class="card">
+    <h3>Go to Row</h3>
+    <label>Target row</label>
+    <input id="targetRow" type="number" step="1" />
+    <br />
+    <button onclick="gotoRow()">GO</button>
+    <button onclick="stopNow()">STOP</button>
+    <div class="small" id="resultLine">Result: —</div>
+  </div>
+
+  <div class="card">
+    <h3>Arduino Log</h3>
+    <pre id="log"></pre>
+  </div>
+
+<script>
+const logEl = document.getElementById("log");
+const statusLine = document.getElementById("statusLine");
+const resultLine = document.getElementById("resultLine");
+
+function log(msg) {
+  const t = new Date().toLocaleTimeString();
+  logEl.textContent += `[${t}] ${msg}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+async function loadConfig() {
+  const r = await fetch("/api/config");
+  const cfg = await r.json();
+  document.getElementById("rowSpacing").value = cfg.row_spacing_cm;
+  document.getElementById("currentRow").value = cfg.current_row;
+  document.getElementById("pwm").value = cfg.pwm;
+  document.getElementById("cmPerSec").value = cfg.cm_per_sec;
+  statusLine.textContent = `Status: ${cfg.last_status} (port=${cfg.serial_port || "auto"})`;
+}
+
+async function saveConfig() {
+  const body = {
+    row_spacing_cm: parseFloat(document.getElementById("rowSpacing").value),
+    current_row: parseInt(document.getElementById("currentRow").value, 10),
+    pwm: parseInt(document.getElementById("pwm").value, 10),
+    cm_per_sec: parseFloat(document.getElementById("cmPerSec").value)
+  };
+
+  const r = await fetch("/api/config", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(body)
+  });
+  const out = await r.json();
+  log("Saved config: " + JSON.stringify(out));
+  await loadConfig();
+}
+
+async function gotoRow() {
+  const target_row = parseInt(document.getElementById("targetRow").value, 10);
+  const r = await fetch("/api/goto_row", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ target_row })
+  });
+  const out = await r.json();
+  log("GO: " + JSON.stringify(out));
+  resultLine.textContent = "Result: " + JSON.stringify(out);
+
+  // Update current row field to match backend state
+  await loadConfig();
+}
+
+async function stopNow() {
+  const r = await fetch("/api/stop", { method: "POST" });
+  const out = await r.json();
+  log("STOP: " + JSON.stringify(out));
+  resultLine.textContent = "Result: STOP sent";
+}
+
+(function connectWS() {
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = () => log("WS connected");
+  ws.onmessage = (e) => {
+    log("SERIAL: " + e.data);
+    statusLine.textContent = `Status: ${e.data}`;
+  };
+  ws.onclose = () => {
+    log("WS closed, reconnecting...");
+    setTimeout(connectWS, 800);
+  };
+})();
+
+loadConfig();
+</script>
+</body>
+</html>

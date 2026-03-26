@@ -1,31 +1,21 @@
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, Body
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-import json, time, threading
+import json, time, threading, asyncio
 import serial
 import serial.tools.list_ports
 
 CONFIG_PATH = "bluetooth_config.json"
 
 DEFAULT_CONFIG = {
-    # Row / distance configuration
     "row_spacing_cm": 60.96,
-    "current_row": 2,
+    "current_row": 1,
     "home_row": 1,
-
-    # Time-based calibration
     "pwm": 170,
-    "cm_per_sec": 45.0,
-
-    # Serial / Bluetooth
-    # Set this to the HC-05 Bluetooth COM port that Windows creates after pairing.
-    # Leave blank to auto-detect a Bluetooth serial port.
-    "serial_port": "",
+    "cm_per_sec": 12.2,
+    "serial_port": "COM3",   # your Bluetooth COM port
     "baud": 9600,
-
-    # If true, prefer Bluetooth-style COM ports in auto-detect.
-    "prefer_bluetooth": True,
 }
 
 
@@ -38,7 +28,6 @@ def load_config():
         return DEFAULT_CONFIG.copy()
 
 
-
 def save_config(cfg):
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
@@ -48,68 +37,45 @@ cfg = load_config()
 pending_final_row = None
 
 
-
-def score_port(port_info, prefer_bluetooth=True):
-    desc = (port_info.description or "").lower()
-    hwid = (port_info.hwid or "").lower()
-    manu = (getattr(port_info, "manufacturer", "") or "").lower()
-    prod = (getattr(port_info, "product", "") or "").lower()
-    dev = (port_info.device or "").lower()
-
-    score = 0
-
-    # Strong hints that Windows created this COM port from Bluetooth SPP
-    bluetooth_markers = [
-        "standard serial over bluetooth",
-        "bluetooth",
-        "bthmodem",
-        "bthenum",
-        "rfcomm",
-    ]
-    if any(x in desc for x in bluetooth_markers):
-        score += 120
-    if any(x in hwid for x in bluetooth_markers):
-        score += 120
-    if any(x in manu for x in bluetooth_markers):
-        score += 80
-    if any(x in prod for x in bluetooth_markers):
-        score += 80
-
-    # Legacy USB Arduino hints as fallback only
-    usb_markers = ["arduino", "wch", "usb serial", "cp210", "ch340"]
-    if any(x in desc for x in usb_markers):
-        score += 25
-    if "usb" in hwid:
-        score += 20
-    if "acm" in dev:
-        score += 20
-
-    if prefer_bluetooth and score >= 120:
-        score += 50
-
-    return score
-
-
-
 def auto_detect_port() -> str:
+    """
+    Try to find the Bluetooth COM port automatically.
+    Prefers ports with 'bluetooth' in the description,
+    falls back to any available port.
+    """
     ports = list(serial.tools.list_ports.comports())
     if not ports:
         return ""
 
-    prefer_bluetooth = bool(cfg.get("prefer_bluetooth", True))
-    ranked = sorted(ports, key=lambda p: score_port(p, prefer_bluetooth), reverse=True)
-    best = ranked[0]
+    # First pass: look for Bluetooth
+    for p in ports:
+        desc = (p.description or "").lower()
+        hwid  = (p.hwid or "").lower()
+        manu  = (getattr(p, "manufacturer", "") or "").lower()
+        bt_markers = ["bluetooth", "bthmodem", "bthenum", "rfcomm",
+                      "standard serial over bluetooth"]
+        if any(x in desc for x in bt_markers) or any(x in hwid for x in bt_markers):
+            return p.device
 
-    # Only trust auto-detect if there is at least some useful signal.
-    if score_port(best, prefer_bluetooth) > 0:
-        return best.device
+    # Second pass: look for Arduino/USB (bench fallback)
+    for p in ports:
+        desc = (p.description or "").lower()
+        hwid  = (p.hwid or "").lower()
+        dev   = (p.device or "").lower()
+        if ("arduino" in desc or "wch" in desc or "usb serial" in desc
+                or "acm" in dev or "usb" in hwid):
+            return p.device
 
     return ports[0].device
 
 
-
 def clamp_int(x, lo, hi):
-    return max(lo, min(hi, int(x)))
+    return max(lo, min(hi, int(float(x))))
+
+
+# ── We store the asyncio event loop so the serial thread can
+#    broadcast messages to WebSocket clients safely. ──────────
+_loop: asyncio.AbstractEventLoop = None
 
 
 class SerialManager:
@@ -127,16 +93,17 @@ class SerialManager:
             port = (cfg.get("serial_port") or "").strip() or auto_detect_port()
             if not port:
                 raise RuntimeError(
-                    "No serial/Bluetooth COM port found. Pair HC-05 to Windows first, "
-                    "then set bluetooth_config.json serial_port to that COM port."
+                    "No Bluetooth COM port found. "
+                    "Pair the HC-05 in Windows first, then set serial_port in bluetooth_config.json."
                 )
 
             cfg["serial_port"] = port
             save_config(cfg)
 
             self.ser = serial.Serial(port, int(cfg["baud"]), timeout=1)
-            # Bluetooth SPP does not reset the Uno like USB often does, so keep this short.
-            time.sleep(0.5)
+            # Bluetooth needs a moment to fully open — no Arduino reset needed,
+            # but 1 s lets the HC-05 settle.
+            time.sleep(1)
             self.last_status = f"CONNECTED {port}"
 
     def send_line(self, line: str):
@@ -150,15 +117,24 @@ class SerialManager:
         with self.lock:
             if not self.ser or not self.ser.is_open:
                 return out
-
             while self.ser.in_waiting:
                 out.append(self.ser.readline().decode(errors="ignore").strip())
         return out
 
 
 serial_mgr = SerialManager()
-ws_clients = set()
+ws_clients: set[WebSocket] = set()
 
+
+async def _broadcast(msg: str):
+    """Send a message to every connected WebSocket client."""
+    dead = set()
+    for ws in ws_clients:
+        try:
+            await ws.send_text(msg)
+        except Exception:
+            dead.add(ws)
+    ws_clients.difference_update(dead)
 
 
 def serial_reader_loop():
@@ -172,6 +148,10 @@ def serial_reader_loop():
                     continue
 
                 serial_mgr.last_status = line
+
+                # ── Broadcast every Arduino line to the UI log ──────────
+                if _loop is not None:
+                    asyncio.run_coroutine_threadsafe(_broadcast(line), _loop)
 
                 if line == "DONE":
                     serial_mgr.last_done_ts = time.time()
@@ -195,45 +175,57 @@ app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
+@app.on_event("startup")
+async def _grab_loop():
+    """Capture the running event loop so the serial thread can use it."""
+    global _loop
+    _loop = asyncio.get_running_loop()
+
+
 @app.get("/")
 def root():
     with open("static/index.html", "r", encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
 
-class ConfigUpdate(BaseModel):
-    row_spacing_cm: float
-    current_row: int
-    home_row: int
-    pwm: int
-    cm_per_sec: float
-
+# ── Config ───────────────────────────────────────────────────
 
 @app.get("/api/config")
 def get_config():
     return {
         "row_spacing_cm": cfg["row_spacing_cm"],
-        "current_row": cfg["current_row"],
-        "home_row": cfg.get("home_row", 1),
-        "pwm": cfg.get("pwm", 170),
-        "cm_per_sec": cfg.get("cm_per_sec", 45.0),
-        "serial_port": cfg.get("serial_port", ""),
-        "baud": cfg.get("baud", 9600),
-        "prefer_bluetooth": cfg.get("prefer_bluetooth", True),
-        "last_status": serial_mgr.last_status,
+        "current_row":    cfg["current_row"],
+        "home_row":       cfg.get("home_row", 1),
+        "pwm":            cfg.get("pwm", 170),
+        "cm_per_sec":     cfg.get("cm_per_sec", 12.2),
+        "serial_port":    cfg.get("serial_port", ""),
+        "baud":           cfg.get("baud", 9600),
+        "last_status":    serial_mgr.last_status,
     }
 
 
 @app.post("/api/config")
-def update_config(body: ConfigUpdate):
-    cfg["row_spacing_cm"] = float(body.row_spacing_cm)
-    cfg["current_row"] = int(body.current_row)
-    cfg["home_row"] = int(body.home_row)
-    cfg["pwm"] = clamp_int(body.pwm, 0, 255)
-    cfg["cm_per_sec"] = float(body.cm_per_sec)
+def update_config(body: dict = Body(...)):
+    """Accepts partial updates — only fields present in the body are changed."""
+    if "row_spacing_cm" in body and body["row_spacing_cm"] not in (None, ""):
+        cfg["row_spacing_cm"] = float(body["row_spacing_cm"])
+    if "current_row" in body and body["current_row"] not in (None, ""):
+        cfg["current_row"] = int(float(body["current_row"]))
+    if "home_row" in body and body["home_row"] not in (None, ""):
+        cfg["home_row"] = int(float(body["home_row"]))
+    if "pwm" in body and body["pwm"] not in (None, ""):
+        cfg["pwm"] = clamp_int(body["pwm"], 0, 255)
+    if "cm_per_sec" in body and body["cm_per_sec"] not in (None, ""):
+        cfg["cm_per_sec"] = float(body["cm_per_sec"])
+    if "serial_port" in body:
+        cfg["serial_port"] = str(body.get("serial_port") or "").strip()
+    if "baud" in body and body["baud"] not in (None, ""):
+        cfg["baud"] = int(float(body["baud"]))
     save_config(cfg)
     return {"ok": True, **cfg}
 
+
+# ── Movement ─────────────────────────────────────────────────
 
 class GotoRowRequest(BaseModel):
     target_row: int
@@ -243,25 +235,25 @@ class GotoRowRequest(BaseModel):
 def goto_row(req: GotoRowRequest):
     global pending_final_row
 
-    target = int(req.target_row)
-    current = int(cfg["current_row"])
+    target   = int(req.target_row)
+    current  = int(cfg["current_row"])
     home_row = int(cfg.get("home_row", 1))
-    spacing = float(cfg["row_spacing_cm"])
+    spacing  = float(cfg["row_spacing_cm"])
 
-    pwm = clamp_int(cfg.get("pwm", 170), 0, 255)
-    cm_per_sec = float(cfg.get("cm_per_sec", 45.0))
+    pwm        = clamp_int(cfg.get("pwm", 170), 0, 255)
+    cm_per_sec = float(cfg.get("cm_per_sec", 12.2))
     if cm_per_sec <= 0:
         raise RuntimeError("cm_per_sec must be > 0. Calibrate first.")
 
-    delta_rows_out = target - current
-    distance_out_cm = abs(delta_rows_out) * spacing
-    duration_out_ms = int((distance_out_cm / cm_per_sec) * 1000)
+    delta_rows_out   = target - current
+    distance_out_cm  = abs(delta_rows_out) * spacing
+    duration_out_ms  = int((distance_out_cm / cm_per_sec) * 1000)
 
-    delta_rows_back = home_row - target
+    delta_rows_back  = home_row - target
     distance_back_cm = abs(delta_rows_back) * spacing
     duration_back_ms = int((distance_back_cm / cm_per_sec) * 1000)
 
-    direction_out = "F" if delta_rows_out > 0 else "B"
+    direction_out  = "F" if delta_rows_out  > 0 else "B"
     direction_back = "F" if delta_rows_back > 0 else "B"
 
     if target == current and target == home_row:
@@ -275,18 +267,20 @@ def goto_row(req: GotoRowRequest):
     )
 
     return {
-        "ok": True,
-        "from_row": current,
-        "target_row": target,
-        "home_row": home_row,
-        "out_direction": direction_out,
-        "out_distance_cm": distance_out_cm,
-        "out_duration_ms": duration_out_ms,
-        "pause_ms": pause_ms,
-        "back_direction": direction_back,
+        "ok":               True,
+        "from_row":         current,
+        "target_row":       target,
+        "home_row":         home_row,
+        "out_direction":    direction_out,
+        "out_distance_cm":  distance_out_cm,
+        "out_duration_ms":  duration_out_ms,
+        "pause_ms":         pause_ms,
+        "back_direction":   direction_back,
         "back_distance_cm": distance_back_cm,
         "back_duration_ms": duration_back_ms,
-        "pwm": pwm,
+        "pwm":              pwm,
+        "serial_port":      cfg.get("serial_port", ""),
+        "last_status":      serial_mgr.last_status,
     }
 
 
@@ -297,6 +291,8 @@ def stop_cart():
     serial_mgr.send_line("STOP")
     return {"ok": True}
 
+
+# ── WebSocket ─────────────────────────────────────────────────
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):

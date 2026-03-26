@@ -1,3 +1,11 @@
+3/25 Update:
+    Did the frontend (for the most part), looks pretty now!
+    To run after venv: py -m uvicorn bluetooth_main:app --reload
+
+    To-do:
+        1. Add flight attendant interface to the website
+        2. HC-05 is ordered: connect other set of wheels to it and smooth out syncing
+
 3/23 Update:
     We finally connected the bluetooth HC-05 and it works!!!
     We were able to plug the arduino into the wall (for power), and plug the actual wiring into the bluetooth.
