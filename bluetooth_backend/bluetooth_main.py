@@ -4,7 +4,6 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import json, time, threading, asyncio
 import serial
-import serial.tools.list_ports
 
 CONFIG_PATH = "bluetooth_config.json"
 
@@ -14,7 +13,8 @@ DEFAULT_CONFIG = {
     "home_row": 1,
     "pwm": 170,
     "cm_per_sec": 12.2,
-    "serial_port": "COM3",   # your Bluetooth COM port
+    "serial_port_1": "COM3",   # Cart 1 (original)
+    "serial_port_2": "COM8",   # Cart 2 (new)
     "baud": 9600,
 }
 
@@ -37,73 +37,34 @@ cfg = load_config()
 pending_final_row = None
 
 
-def auto_detect_port() -> str:
-    """
-    Try to find the Bluetooth COM port automatically.
-    Prefers ports with 'bluetooth' in the description,
-    falls back to any available port.
-    """
-    ports = list(serial.tools.list_ports.comports())
-    if not ports:
-        return ""
-
-    # First pass: look for Bluetooth
-    for p in ports:
-        desc = (p.description or "").lower()
-        hwid  = (p.hwid or "").lower()
-        manu  = (getattr(p, "manufacturer", "") or "").lower()
-        bt_markers = ["bluetooth", "bthmodem", "bthenum", "rfcomm",
-                      "standard serial over bluetooth"]
-        if any(x in desc for x in bt_markers) or any(x in hwid for x in bt_markers):
-            return p.device
-
-    # Second pass: look for Arduino/USB (bench fallback)
-    for p in ports:
-        desc = (p.description or "").lower()
-        hwid  = (p.hwid or "").lower()
-        dev   = (p.device or "").lower()
-        if ("arduino" in desc or "wch" in desc or "usb serial" in desc
-                or "acm" in dev or "usb" in hwid):
-            return p.device
-
-    return ports[0].device
-
-
 def clamp_int(x, lo, hi):
     return max(lo, min(hi, int(float(x))))
 
 
-# ── We store the asyncio event loop so the serial thread can
-#    broadcast messages to WebSocket clients safely. ──────────
 _loop: asyncio.AbstractEventLoop = None
 
 
 class SerialManager:
-    def __init__(self):
-        self.lock = threading.RLock()
-        self.ser = None
-        self.last_status = "DISCONNECTED"
+    def __init__(self, port_key: str, label: str):
+        self.port_key     = port_key  # key in cfg, e.g. "serial_port_1"
+        self.label        = label     # e.g. "CART1"
+        self.lock         = threading.RLock()
+        self.ser          = None
+        self.last_status  = "DISCONNECTED"
         self.last_done_ts = 0.0
 
     def connect(self):
         with self.lock:
             if self.ser and self.ser.is_open:
                 return
-
-            port = (cfg.get("serial_port") or "").strip() or auto_detect_port()
+            port = (cfg.get(self.port_key) or "").strip()
             if not port:
                 raise RuntimeError(
-                    "No Bluetooth COM port found. "
-                    "Pair the HC-05 in Windows first, then set serial_port in bluetooth_config.json."
+                    f"[{self.label}] No port configured. "
+                    f"Set {self.port_key} in bluetooth_config.json."
                 )
-
-            cfg["serial_port"] = port
-            save_config(cfg)
-
             self.ser = serial.Serial(port, int(cfg["baud"]), timeout=1)
-            # Bluetooth needs a moment to fully open — no Arduino reset needed,
-            # but 1 s lets the HC-05 settle.
-            time.sleep(1)
+            time.sleep(1)  # let HC-05 settle
             self.last_status = f"CONNECTED {port}"
 
     def send_line(self, line: str):
@@ -122,12 +83,14 @@ class SerialManager:
         return out
 
 
-serial_mgr = SerialManager()
+serial_mgr_1 = SerialManager("serial_port_1", "CART1")
+serial_mgr_2 = SerialManager("serial_port_2", "CART2")
+ALL_CARTS    = [serial_mgr_1, serial_mgr_2]
+
 ws_clients: set[WebSocket] = set()
 
 
 async def _broadcast(msg: str):
-    """Send a message to every connected WebSocket client."""
     dead = set()
     for ws in ws_clients:
         try:
@@ -137,34 +100,61 @@ async def _broadcast(msg: str):
     ws_clients.difference_update(dead)
 
 
+def stop_all_carts():
+    """Send STOP to every cart — used for e-stop and safety-stop."""
+    for mgr in ALL_CARTS:
+        try:
+            mgr.send_line("STOP")
+        except Exception:
+            pass
+
+
 def serial_reader_loop():
     global pending_final_row
 
     while True:
         try:
-            lines = serial_mgr.read_lines_nonblocking()
-            for line in lines:
-                if not line:
-                    continue
+            for mgr in ALL_CARTS:
+                lines = mgr.read_lines_nonblocking()
+                for line in lines:
+                    if not line:
+                        continue
 
-                serial_mgr.last_status = line
+                    mgr.last_status = line
+                    tagged = f"[{mgr.label}] {line}"
 
-                # ── Broadcast every Arduino line to the UI log ──────────
-                if _loop is not None:
-                    asyncio.run_coroutine_threadsafe(_broadcast(line), _loop)
+                    # Forward everything to the UI log
+                    if _loop is not None:
+                        asyncio.run_coroutine_threadsafe(_broadcast(tagged), _loop)
 
-                if line == "DONE":
-                    serial_mgr.last_done_ts = time.time()
-                    if pending_final_row is not None:
-                        cfg["current_row"] = pending_final_row
-                        save_config(cfg)
+                    # ── Any obstacle on any cart → stop ALL carts ──
+                    if line.startswith("SAFETY_STOP"):
+                        stop_all_carts()
+                        if _loop is not None:
+                            asyncio.run_coroutine_threadsafe(
+                                _broadcast(
+                                    f"[SYSTEM] {mgr.label} obstacle detected — ALL carts stopped"
+                                ),
+                                _loop,
+                            )
+
+                    elif line == "DONE":
+                        mgr.last_done_ts = time.time()
+                        # Update current_row only once both carts have finished
+                        both_done = all(
+                            (time.time() - m.last_done_ts) < 5.0
+                            for m in ALL_CARTS
+                        )
+                        if both_done and pending_final_row is not None:
+                            cfg["current_row"] = pending_final_row
+                            save_config(cfg)
+                            pending_final_row = None
+
+                    elif line.startswith("STOPPED"):
                         pending_final_row = None
 
-                elif line.startswith("STOPPED"):
-                    pending_final_row = None
-
-        except Exception as e:
-            serial_mgr.last_status = f"SERIAL_ERR: {e}"
+        except Exception:
+            pass
 
         time.sleep(0.05)
 
@@ -177,7 +167,6 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.on_event("startup")
 async def _grab_loop():
-    """Capture the running event loop so the serial thread can use it."""
     global _loop
     _loop = asyncio.get_running_loop()
 
@@ -198,15 +187,16 @@ def get_config():
         "home_row":       cfg.get("home_row", 1),
         "pwm":            cfg.get("pwm", 170),
         "cm_per_sec":     cfg.get("cm_per_sec", 12.2),
-        "serial_port":    cfg.get("serial_port", ""),
+        "serial_port_1":  cfg.get("serial_port_1", "COM3"),
+        "serial_port_2":  cfg.get("serial_port_2", "COM8"),
         "baud":           cfg.get("baud", 9600),
-        "last_status":    serial_mgr.last_status,
+        "last_status_1":  serial_mgr_1.last_status,
+        "last_status_2":  serial_mgr_2.last_status,
     }
 
 
 @app.post("/api/config")
 def update_config(body: dict = Body(...)):
-    """Accepts partial updates — only fields present in the body are changed."""
     if "row_spacing_cm" in body and body["row_spacing_cm"] not in (None, ""):
         cfg["row_spacing_cm"] = float(body["row_spacing_cm"])
     if "current_row" in body and body["current_row"] not in (None, ""):
@@ -217,8 +207,10 @@ def update_config(body: dict = Body(...)):
         cfg["pwm"] = clamp_int(body["pwm"], 0, 255)
     if "cm_per_sec" in body and body["cm_per_sec"] not in (None, ""):
         cfg["cm_per_sec"] = float(body["cm_per_sec"])
-    if "serial_port" in body:
-        cfg["serial_port"] = str(body.get("serial_port") or "").strip()
+    if "serial_port_1" in body:
+        cfg["serial_port_1"] = str(body.get("serial_port_1") or "").strip()
+    if "serial_port_2" in body:
+        cfg["serial_port_2"] = str(body.get("serial_port_2") or "").strip()
     if "baud" in body and body["baud"] not in (None, ""):
         cfg["baud"] = int(float(body["baud"]))
     save_config(cfg)
@@ -235,15 +227,15 @@ class GotoRowRequest(BaseModel):
 def goto_row(req: GotoRowRequest):
     global pending_final_row
 
-    target   = int(req.target_row)
-    current  = int(cfg["current_row"])
-    home_row = int(cfg.get("home_row", 1))
-    spacing  = float(cfg["row_spacing_cm"])
-
+    target     = int(req.target_row)
+    current    = int(cfg["current_row"])
+    home_row   = int(cfg.get("home_row", 1))
+    spacing    = float(cfg["row_spacing_cm"])
     pwm        = clamp_int(cfg.get("pwm", 170), 0, 255)
     cm_per_sec = float(cfg.get("cm_per_sec", 12.2))
+
     if cm_per_sec <= 0:
-        raise RuntimeError("cm_per_sec must be > 0. Calibrate first.")
+        raise RuntimeError("cm_per_sec must be > 0.")
 
     delta_rows_out   = target - current
     distance_out_cm  = abs(delta_rows_out) * spacing
@@ -257,14 +249,20 @@ def goto_row(req: GotoRowRequest):
     direction_back = "F" if delta_rows_back > 0 else "B"
 
     if target == current and target == home_row:
-        serial_mgr.send_line("STOP")
+        stop_all_carts()
         return {"ok": True, "msg": "Already at target and home row", "current_row": current}
 
     pause_ms = 10000
     pending_final_row = home_row
-    serial_mgr.send_line(
-        f"TRIP {direction_out} {pwm} {duration_out_ms} {pause_ms} {direction_back} {duration_back_ms}"
+
+    cmd = (
+        f"TRIP {direction_out} {pwm} {duration_out_ms} "
+        f"{pause_ms} {direction_back} {duration_back_ms}"
     )
+
+    # Send the same command to both carts at the same time
+    for mgr in ALL_CARTS:
+        mgr.send_line(cmd)
 
     return {
         "ok":               True,
@@ -279,8 +277,7 @@ def goto_row(req: GotoRowRequest):
         "back_distance_cm": distance_back_cm,
         "back_duration_ms": duration_back_ms,
         "pwm":              pwm,
-        "serial_port":      cfg.get("serial_port", ""),
-        "last_status":      serial_mgr.last_status,
+        "cmd_sent":         cmd,
     }
 
 
@@ -288,7 +285,7 @@ def goto_row(req: GotoRowRequest):
 def stop_cart():
     global pending_final_row
     pending_final_row = None
-    serial_mgr.send_line("STOP")
+    stop_all_carts()
     return {"ok": True}
 
 

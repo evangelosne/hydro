@@ -1,3 +1,10 @@
+3/30 Update:
+    Both wheels run same time.
+    To-do:
+        1. Add flight attendant interface to the website
+        2. Edit Arduino code to make it slow to a stop rather than abrupt
+        3. Edit code to make it continue after stopping due to sensor's obstacle.
+
 3/25 Update:
     Did the frontend (for the most part), looks pretty now!
     To run after venv: py -m uvicorn bluetooth_main:app --reload
