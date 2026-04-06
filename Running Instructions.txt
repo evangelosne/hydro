@@ -1,0 +1,9 @@
+Robot Arduino port instructions:
+1: Upload Arduino IDE code to both arduinos by connecting to laptop (this has already been done, and you 99% probably don't have to do this again)
+2: Turn on both HC-05's (Bluetooth connector), and connect to laptop. Pin is 1234. Check which port by going to "more Bluetooth settings" and it look at the 2 ports which are "outgoing". Adjust the bluetooth_config file as necessary (if necessary).
+
+
+Website running instructions:
+1: On terminal, cd into hydro and cd into bluetooth_backend folder
+2: .venv\Scripts\activate
+3: py -m uvicorn bluetooth_main:app --reload
