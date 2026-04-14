@@ -14,13 +14,15 @@
 // Commands from laptop:
 //   TRIP <out_dir> <pwm> <out_ms> <pause_ms> <back_dir> <back_ms>
 //   STOP
+//   PAUSE   (externally pause mid-trip, e.g. other cart hit obstacle)
+//   RESUME  (externally resume after partner cart clears)
 // ------------------------------------------------------------
 
 #include <SoftwareSerial.h>
 
 // ---- HC-05 Bluetooth serial ----
-const int BT_RX_PIN = 2;  // Arduino receives from HC-05 TXD
-const int BT_TX_PIN = 3;  // Arduino sends to HC-05 RXD
+const int BT_RX_PIN = 2;
+const int BT_TX_PIN = 3;
 SoftwareSerial btSerial(BT_RX_PIN, BT_TX_PIN);
 
 // ---- Motor A pins ----
@@ -36,14 +38,19 @@ const int BIN2 = 7;
 // ---- Standby pin ----
 const int STBY = 4;
 
-// ---- Ultrasonic Sensor ----
-const int TRIG = 11;
-const int ECHO = 12;
-
 // ---- Safety thresholds ----
 const long STOP_CM = 8;
 const long RESUME_CM = STOP_CM + 3;
 const unsigned long SENSOR_PERIOD_MS = 50;
+const unsigned long DECEL_MS = 1200;
+unsigned long resume_cooldown_ms = 0;
+bool paused_by_partner = false;
+
+// ---- Sensors ----
+const int TRIG_FRONT = 11;
+const int ECHO_FRONT = 12;
+const int TRIG_BACK  = 13;
+const int ECHO_BACK  = A0;
 
 // ---- Trip phases ----
 enum Phase {
@@ -105,11 +112,14 @@ void setMotorB(int speed) {
 }
 
 void stopMotors() {
+  digitalWrite(AIN1, LOW);
+  digitalWrite(AIN2, LOW);
   analogWrite(PWMA, 0);
+  digitalWrite(BIN1, LOW);
+  digitalWrite(BIN2, LOW);
   analogWrite(PWMB, 0);
   moving = false;
 }
-
 void drive(char dir, int pwm) {
   pwm = constrain(pwm, 0, 255);
   if (dir == 'F') {
@@ -121,14 +131,14 @@ void drive(char dir, int pwm) {
   }
 }
 
-long getDistanceCm() {
-  digitalWrite(TRIG, LOW);
+long getDistanceCm(int trigPin, int echoPin) {
+  digitalWrite(trigPin, LOW);
   delayMicroseconds(2);
-  digitalWrite(TRIG, HIGH);
+  digitalWrite(trigPin, HIGH);
   delayMicroseconds(10);
-  digitalWrite(TRIG, LOW);
+  digitalWrite(trigPin, LOW);
 
-  long duration = pulseIn(ECHO, HIGH, 30000);
+  long duration = pulseIn(echoPin, HIGH, 30000);
   if (duration == 0) return 9999;
   return (long)(duration * 0.034 / 2.0);
 }
@@ -171,41 +181,23 @@ void cancelTrip() {
   logLine("STOPPED");
 }
 
+unsigned long pause_started_ms = 0;
+
 void pauseForObstacle(long distanceCm) {
   if (!moving) return;
-
-  unsigned long now = millis();
-  if ((long)(move_end_ms - now) > 0) {
-    remaining_ms = move_end_ms - now;
-  } else {
-    remaining_ms = 0;
-  }
-
+  pause_started_ms = millis();
   stopMotors();
   paused_for_obstacle = true;
-  logLine("SAFETY_STOP " + String(distanceCm) + " REMAINING_MS " + String(remaining_ms));
+  logLine("SAFETY_STOP " + String(distanceCm));
 }
 
 void resumeAfterObstacleClears() {
   if (!paused_for_obstacle) return;
-
-  if (remaining_ms == 0) {
-    paused_for_obstacle = false;
-    if (phase == MOVING_OUT) {
-      phase = PAUSE_AT_ROW;
-      beginDwell(pause_ms);
-    } else if (phase == RETURNING_HOME) {
-      finishTrip();
-    }
-    return;
-  }
-
+  move_end_ms += (millis() - pause_started_ms);
+  paused_for_obstacle = false;
   drive(current_dir, current_pwm);
   moving = true;
-  paused_for_obstacle = false;
-  move_end_ms = millis() + remaining_ms;
-
-  logLine("RESUMED " + String(current_dir) + " " + String(current_pwm) + " " + String(remaining_ms));
+  logLine("RESUMED");
 }
 
 bool parseTripCommand(String cmd) {
@@ -222,30 +214,21 @@ bool parseTripCommand(String cmd) {
     &outDir, &pwm, &outDur, &pauseDur, &backDir, &backDur
   );
 
-  if (matched != 6) {
-    logLine("ERR BAD_FORMAT");
-    return false;
-  }
+  if (matched != 6) { logLine("ERR BAD_FORMAT"); return false; }
 
-  outDir = toupper(outDir);
+  outDir  = toupper(outDir);
   backDir = toupper(backDir);
 
-  if (!((outDir == 'F') || (outDir == 'B'))) {
-    logLine("ERR BAD_OUT_DIR");
-    return false;
-  }
-  if (!((backDir == 'F') || (backDir == 'B'))) {
-    logLine("ERR BAD_BACK_DIR");
-    return false;
-  }
+  if (!((outDir == 'F') || (outDir == 'B')))  { logLine("ERR BAD_OUT_DIR");  return false; }
+  if (!((backDir == 'F') || (backDir == 'B'))) { logLine("ERR BAD_BACK_DIR"); return false; }
 
   pwm = constrain(pwm, 0, 255);
 
-  out_dir = outDir;
+  out_dir  = outDir;
   back_dir = backDir;
   trip_pwm = pwm;
-  out_ms = outDur;
-  back_ms = backDur;
+  out_ms   = outDur;
+  back_ms  = backDur;
   pause_ms = pauseDur;
   return true;
 }
@@ -258,6 +241,24 @@ void handleCommand(String cmd) {
     cancelTrip();
     return;
   }
+
+  // External pause — partner cart hit an obstacle
+  if (cmd == "PAUSE") {
+  if (moving) {
+    pause_started_ms = millis();
+    stopMotors();
+    paused_for_obstacle = true;
+    paused_by_partner = true;  // ← mark it as external
+    logLine("PAUSED_BY_PARTNER");
+  }
+  return;
+}
+
+if (cmd == "RESUME") {
+  paused_by_partner = false;  // ← clear before resuming
+  resumeAfterObstacleClears();
+  return;
+}
 
   if (cmd.startsWith("TRIP")) {
     if (!parseTripCommand(cmd)) return;
@@ -289,15 +290,18 @@ void setup() {
   btSerial.begin(9600);
 
   pinMode(PWMA, OUTPUT);
-  pinMode(AIN1, OUTPUT);
-  pinMode(AIN2, OUTPUT);
   pinMode(PWMB, OUTPUT);
+  pinMode(AIN1, OUTPUT);
   pinMode(BIN1, OUTPUT);
+  pinMode(AIN2, OUTPUT);
   pinMode(BIN2, OUTPUT);
   pinMode(STBY, OUTPUT);
   digitalWrite(STBY, HIGH);
-  pinMode(TRIG, OUTPUT);
-  pinMode(ECHO, INPUT);
+
+  pinMode(TRIG_FRONT, OUTPUT);
+  pinMode(ECHO_FRONT, INPUT);
+  pinMode(TRIG_BACK,  OUTPUT);
+  pinMode(ECHO_BACK,  INPUT);
 
   stopMotors();
   logLine("READY");
@@ -309,7 +313,6 @@ void loop() {
     handleCommand(cmd);
   }
 
-  // Optional USB fallback for bench testing while tethered.
   if (Serial.available()) {
     String cmd = Serial.readStringUntil('\n');
     handleCommand(cmd);
@@ -319,25 +322,39 @@ void loop() {
   static unsigned long lastSense = 0;
   if (now - lastSense >= SENSOR_PERIOD_MS) {
     lastSense = now;
-    long d = getDistanceCm();
 
-    if (moving && d <= STOP_CM) {
-      pauseForObstacle(d);
-    } else if (paused_for_obstacle && d > RESUME_CM) {
-      resumeAfterObstacleClears();
+    long d;
+    if (current_dir == 'F') {
+      d = getDistanceCm(TRIG_FRONT, ECHO_FRONT);
+    } else {
+      d = getDistanceCm(TRIG_BACK, ECHO_BACK);
     }
+
+   if (moving && d <= STOP_CM && paused_for_obstacle == false) {
+    pauseForObstacle(d);
+  } else if (paused_for_obstacle && !paused_by_partner && d > RESUME_CM) {
+    resumeAfterObstacleClears();
+  }
   }
 
-  if (moving && (long)(millis() - move_end_ms) >= 0) {
-    stopMotors();
-    paused_for_obstacle = false;
-    remaining_ms = 0;
+  if (moving) {
+    long timeLeft = (long)(move_end_ms - millis());
 
-    if (phase == MOVING_OUT) {
-      phase = PAUSE_AT_ROW;
-      beginDwell(pause_ms);
-    } else if (phase == RETURNING_HOME) {
-      finishTrip();
+    if (timeLeft <= 0) {
+      stopMotors();
+      paused_for_obstacle = false;
+      remaining_ms = 0;
+
+      if (phase == MOVING_OUT) {
+        phase = PAUSE_AT_ROW;
+        beginDwell(pause_ms);
+      } else if (phase == RETURNING_HOME) {
+        finishTrip();
+      }
+
+    } else if (timeLeft < (long)DECEL_MS) {
+      int rampedPwm = (int)map(timeLeft, 0, (long)DECEL_MS, 0, current_pwm);
+      drive(current_dir, rampedPwm);
     }
   }
 

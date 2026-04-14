@@ -13,8 +13,8 @@ DEFAULT_CONFIG = {
     "home_row": 1,
     "pwm": 170,
     "cm_per_sec": 12.2,
-    "serial_port_1": "COM3",   # Cart 1 (original)
-    "serial_port_2": "COM8",   # Cart 2 (new)
+    "serial_port_1": "COM5",
+    "serial_port_2": "COM8",
     "baud": 9600,
 }
 
@@ -46,8 +46,8 @@ _loop: asyncio.AbstractEventLoop = None
 
 class SerialManager:
     def __init__(self, port_key: str, label: str):
-        self.port_key     = port_key  # key in cfg, e.g. "serial_port_1"
-        self.label        = label     # e.g. "CART1"
+        self.port_key     = port_key
+        self.label        = label
         self.lock         = threading.RLock()
         self.ser          = None
         self.last_status  = "DISCONNECTED"
@@ -64,7 +64,7 @@ class SerialManager:
                     f"Set {self.port_key} in bluetooth_config.json."
                 )
             self.ser = serial.Serial(port, int(cfg["baud"]), timeout=1)
-            time.sleep(1)  # let HC-05 settle
+            time.sleep(1)
             self.last_status = f"CONNECTED {port}"
 
     def send_line(self, line: str):
@@ -101,12 +101,31 @@ async def _broadcast(msg: str):
 
 
 def stop_all_carts():
-    """Send STOP to every cart — used for e-stop and safety-stop."""
     for mgr in ALL_CARTS:
         try:
             mgr.send_line("STOP")
         except Exception:
             pass
+
+
+def pause_other_carts(except_mgr):
+    """Send PAUSE to every cart except the one that triggered the stop."""
+    for mgr in ALL_CARTS:
+        if mgr is not except_mgr:
+            try:
+                mgr.send_line("PAUSE")
+            except Exception:
+                pass
+
+
+def resume_other_carts(except_mgr):
+    """Send RESUME to every cart except the one that self-resumed."""
+    for mgr in ALL_CARTS:
+        if mgr is not except_mgr:
+            try:
+                mgr.send_line("RESUME")
+            except Exception:
+                pass
 
 
 def serial_reader_loop():
@@ -123,24 +142,29 @@ def serial_reader_loop():
                     mgr.last_status = line
                     tagged = f"[{mgr.label}] {line}"
 
-                    # Forward everything to the UI log
                     if _loop is not None:
                         asyncio.run_coroutine_threadsafe(_broadcast(tagged), _loop)
 
-                    # ── Any obstacle on any cart → stop ALL carts ──
+                    # ── One cart hit an obstacle → pause all others ──
                     if line.startswith("SAFETY_STOP"):
-                        stop_all_carts()
+                        pause_other_carts(mgr)
                         if _loop is not None:
                             asyncio.run_coroutine_threadsafe(
-                                _broadcast(
-                                    f"[SYSTEM] {mgr.label} obstacle detected — ALL carts stopped"
-                                ),
+                                _broadcast(f"[SYSTEM] {mgr.label} obstacle detected — all carts paused"),
+                                _loop,
+                            )
+
+                    # ── One cart resumed → resume all others ──
+                    elif line == "RESUMED":
+                        resume_other_carts(mgr)
+                        if _loop is not None:
+                            asyncio.run_coroutine_threadsafe(
+                                _broadcast(f"[SYSTEM] {mgr.label} obstacle cleared — all carts resuming"),
                                 _loop,
                             )
 
                     elif line == "DONE":
                         mgr.last_done_ts = time.time()
-                        # Update current_row only once both carts have finished
                         both_done = all(
                             (time.time() - m.last_done_ts) < 5.0
                             for m in ALL_CARTS
@@ -177,8 +201,6 @@ def root():
         return HTMLResponse(f.read())
 
 
-# ── Config ───────────────────────────────────────────────────
-
 @app.get("/api/config")
 def get_config():
     return {
@@ -187,8 +209,8 @@ def get_config():
         "home_row":       cfg.get("home_row", 1),
         "pwm":            cfg.get("pwm", 170),
         "cm_per_sec":     cfg.get("cm_per_sec", 12.2),
-        "serial_port_1":  cfg.get("serial_port_1", "COM3"),
-        "serial_port_2":  cfg.get("serial_port_2", "COM8"),
+        "serial_port_1":  cfg.get("serial_port_1", "COM4"),
+        "serial_port_2":  cfg.get("serial_port_2", "COM6"),
         "baud":           cfg.get("baud", 9600),
         "last_status_1":  serial_mgr_1.last_status,
         "last_status_2":  serial_mgr_2.last_status,
@@ -216,8 +238,6 @@ def update_config(body: dict = Body(...)):
     save_config(cfg)
     return {"ok": True, **cfg}
 
-
-# ── Movement ─────────────────────────────────────────────────
 
 class GotoRowRequest(BaseModel):
     target_row: int
@@ -260,7 +280,6 @@ def goto_row(req: GotoRowRequest):
         f"{pause_ms} {direction_back} {duration_back_ms}"
     )
 
-    # Send the same command to both carts at the same time
     for mgr in ALL_CARTS:
         mgr.send_line(cmd)
 
@@ -288,8 +307,6 @@ def stop_cart():
     stop_all_carts()
     return {"ok": True}
 
-
-# ── WebSocket ─────────────────────────────────────────────────
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
