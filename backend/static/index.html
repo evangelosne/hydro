@@ -1,141 +1,299 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Robot Row Control</title>
+  <meta charset="utf-8"/>
+  <title>AeroRow — Cabin Navigation</title>
+  <link href="https://fonts.googleapis.com/css2?family=Antonio:wght@300;400;700&family=DM+Mono:wght@300;400&family=Sora:wght@300;400;600&display=swap" rel="stylesheet">
   <style>
-    body { font-family: Arial, sans-serif; margin: 24px; max-width: 720px; }
-    .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
-    label { display:block; margin-top: 10px; }
-    input { padding: 8px; width: 200px; }
-    button { padding: 10px 14px; margin-top: 12px; cursor: pointer; }
-    #log { background: #111; color: #0f0; padding: 10px; height: 160px; overflow:auto; border-radius: 8px; }
-    .row { display:flex; gap: 12px; flex-wrap: wrap; }
-    .small { color:#666; font-size: 12px; }
+    :root {
+      --ink:    #0b0e14;
+      --sky:    #f0f4fa;
+      --cloud:  #e2eaf5;
+      --fog:    #c8d4e8;
+      --mist:   #8fa3bf;
+      --deep:   #1a2540;
+      --amber:  #e8a020;
+      --go:     #1a6ef5;
+      --go2:    rgba(26,110,245,0.12);
+      --stop:   #d63030;
+      --serif:  'Antonio', sans-serif;
+      --mono:   'DM Mono', monospace;
+      --body:   'Sora', sans-serif;
+      --ease:   cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body { background: var(--sky); color: var(--ink); font-family: var(--body); min-height: 100vh; overflow-x: hidden; }
+
+    .sky-bg { position: fixed; inset: 0; z-index: 0; pointer-events: none; background: linear-gradient(170deg,#dce8f8 0%,#f0f4fa 55%,#e8edf5 100%); overflow: hidden; }
+    .cloud-svg { position: absolute; opacity: 0.45; animation: drift linear infinite; }
+    .cloud-svg:nth-child(1) { top:8%;  left:-180px; width:320px; animation-duration:38s; animation-delay:0s; }
+    .cloud-svg:nth-child(2) { top:30%; left:-240px; width:420px; animation-duration:52s; animation-delay:-18s; opacity:0.25; }
+    .cloud-svg:nth-child(3) { top:62%; left:-200px; width:280px; animation-duration:44s; animation-delay:-8s;  opacity:0.3; }
+    .cloud-svg:nth-child(4) { top:80%; left:-300px; width:500px; animation-duration:60s; animation-delay:-30s; opacity:0.2; }
+    @keyframes drift { from{transform:translateX(0)} to{transform:translateX(calc(100vw + 600px))} }
+
+    .wrap { position:relative; z-index:1; max-width:680px; margin:0 auto; padding:0 24px 64px; }
+
+    header { display:flex; align-items:flex-end; justify-content:space-between; padding:40px 0 28px; border-bottom:1px solid var(--fog); opacity:0; transform:translateY(-18px); animation:fadeUp 0.7s var(--ease) 0.1s forwards; }
+    .airline-mark .route { font-family:var(--mono); font-size:10px; letter-spacing:0.15em; color:var(--mist); text-transform:uppercase; }
+    .airline-mark h1 { font-family:var(--serif); font-size:32px; font-weight:700; letter-spacing:0.04em; line-height:1; color:var(--deep); }
+    .airline-mark h1 span { color:var(--amber); }
+    .conn-badge { display:flex; align-items:center; gap:7px; font-family:var(--mono); font-size:11px; color:var(--mist); padding:7px 14px; border:1px solid var(--fog); border-radius:100px; background:rgba(255,255,255,0.7); backdrop-filter:blur(8px); }
+    .conn-dot { width:7px; height:7px; border-radius:50%; background:var(--go); box-shadow:0 0 6px rgba(26,110,245,0.5); animation:blink 2.4s ease-in-out infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    .boarding-pass { margin-top:28px; background:#fff; border-radius:20px; box-shadow:0 4px 32px rgba(26,37,64,0.08),0 1px 4px rgba(26,37,64,0.04); overflow:hidden; opacity:0; transform:translateY(24px); animation:fadeUp 0.8s var(--ease) 0.3s forwards; }
+    .bp-header { background:var(--deep); padding:22px 28px 18px; display:flex; align-items:center; justify-content:space-between; }
+    .bp-header .label { font-family:var(--mono); font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--mist); }
+    .bp-header .value { font-family:var(--serif); font-size:28px; font-weight:700; color:#fff; letter-spacing:0.06em; margin-top:2px; }
+    .bp-header .row-badge { text-align:right; }
+    .bp-header .row-badge .label { color:rgba(255,255,255,0.35); }
+    .bp-header .row-badge .value { color:var(--amber); }
+
+    .flight-path { padding:16px 28px 0; display:flex; align-items:center; }
+    .fp-city { font-family:var(--mono); font-size:10px; color:var(--mist); letter-spacing:0.1em; flex-shrink:0; }
+    .fp-line { flex:1; height:1px; background:var(--fog); margin:0 10px; position:relative; overflow:visible; }
+    .fp-plane { position:absolute; top:50%; left:0; transform:translateY(-50%); font-size:14px; line-height:1; transition:left 1.4s var(--ease); }
+
+    .bp-body { padding:20px 28px 24px; }
+    .row-input-group { display:flex; align-items:flex-end; gap:12px; }
+    .row-input-group .field { flex:1; }
+    .field label { display:block; font-family:var(--mono); font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:var(--mist); margin-bottom:7px; }
+    .field input { width:100%; background:var(--sky); border:1.5px solid var(--cloud); border-radius:10px; color:var(--deep); font-family:var(--serif); font-size:36px; font-weight:700; letter-spacing:0.06em; padding:14px 18px; outline:none; transition:border-color 0.2s,box-shadow 0.2s,background 0.2s; }
+    .field input:focus { border-color:var(--go); box-shadow:0 0 0 4px var(--go2); background:#fff; }
+    .field input::placeholder { color:var(--fog); }
+    .btn-go { font-family:var(--serif); font-size:17px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; background:var(--go); color:#fff; border:none; border-radius:10px; padding:0 26px; height:74px; cursor:pointer; transition:transform 0.15s var(--ease),box-shadow 0.2s; white-space:nowrap; flex-shrink:0; }
+    .btn-go:hover { transform:translateY(-2px); box-shadow:0 8px 24px rgba(26,110,245,0.35); }
+    .btn-go:active { transform:translateY(0); }
+
+    .tear { display:flex; align-items:center; padding:0 20px; }
+    .tear::before,.tear::after { content:''; width:18px; height:18px; border-radius:50%; background:var(--sky); border:1px solid var(--fog); flex-shrink:0; }
+    .tear-line { flex:1; border-top:2px dashed var(--fog); }
+
+    .bp-status { padding:14px 28px 18px; display:flex; align-items:center; gap:10px; }
+    .status-tag { font-family:var(--mono); font-size:9px; letter-spacing:0.14em; text-transform:uppercase; color:var(--mist); padding:3px 8px; border:1px solid var(--fog); border-radius:4px; flex-shrink:0; }
+    #statusLine { font-family:var(--mono); font-size:12px; color:var(--deep); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+    .stop-wrap { margin-top:12px; opacity:0; transform:translateY(16px); animation:fadeUp 0.7s var(--ease) 0.5s forwards; }
+    .btn-stop { width:100%; font-family:var(--serif); font-size:16px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; background:transparent; color:var(--stop); border:1.5px solid var(--stop); border-radius:12px; padding:15px; cursor:pointer; transition:background 0.18s,color 0.18s,box-shadow 0.2s,transform 0.1s var(--ease); }
+    .btn-stop:hover { background:var(--stop); color:#fff; box-shadow:0 6px 20px rgba(214,48,48,0.2); transform:translateY(-1px); }
+    .btn-stop:active { transform:translateY(0); }
+
+    #resultLine { margin-top:10px; min-height:0; padding:0 16px; max-height:0; overflow:hidden; font-family:var(--mono); font-size:12px; color:var(--deep); background:rgba(255,255,255,0.85); border:1px solid transparent; border-radius:10px; backdrop-filter:blur(8px); transition:max-height 0.4s var(--ease),padding 0.3s,opacity 0.3s; opacity:0; }
+    #resultLine.show { max-height:60px; padding:10px 16px; opacity:1; border-color:var(--fog); }
+
+    .eng-section { margin-top:36px; opacity:0; transform:translateY(24px); animation:fadeUp 0.7s var(--ease) 0.65s forwards; }
+    .eng-toggle { display:flex; align-items:center; gap:10px; cursor:pointer; padding:12px 0; user-select:none; }
+    .eng-toggle .line { flex:1; height:1px; background:var(--fog); }
+    .eng-toggle span { font-family:var(--mono); font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:var(--mist); white-space:nowrap; display:flex; align-items:center; gap:6px; }
+    .eng-toggle span::before { content:'⚙'; font-size:11px; }
+    .eng-arrow { font-size:10px; color:var(--mist); transition:transform 0.3s var(--ease); }
+    .eng-toggle.open .eng-arrow { transform:rotate(180deg); }
+    .eng-panel { overflow:hidden; max-height:0; transition:max-height 0.5s var(--ease),opacity 0.35s ease; opacity:0; }
+    .eng-panel.open { max-height:600px; opacity:1; }
+    .eng-card { background:rgba(255,255,255,0.75); border:1px solid var(--fog); border-radius:14px; padding:22px; backdrop-filter:blur(6px); }
+    .eng-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+    .eng-grid .field input { font-family:var(--mono); font-size:18px; font-weight:400; padding:10px 14px; }
+    .eng-footer { display:flex; align-items:center; justify-content:flex-end; margin-top:18px; padding-top:14px; border-top:1px solid var(--cloud); }
+    .btn-save { font-family:var(--body); font-size:13px; font-weight:600; letter-spacing:0.04em; background:var(--deep); color:#fff; border:none; border-radius:8px; padding:10px 22px; cursor:pointer; transition:opacity 0.15s,transform 0.15s var(--ease),box-shadow 0.2s; }
+    .btn-save:hover { opacity:0.85; transform:translateY(-1px); box-shadow:0 6px 16px rgba(26,37,64,0.2); }
+
+    .log-section { margin-top:28px; opacity:0; transform:translateY(24px); animation:fadeUp 0.7s var(--ease) 0.8s forwards; }
+    .log-header { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+    .log-header span { font-family:var(--mono); font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:var(--mist); }
+    .log-header::after { content:''; flex:1; height:1px; background:var(--fog); }
+    #log { background:var(--deep); color:rgba(200,220,255,0.75); font-family:var(--mono); font-size:11.5px; line-height:1.8; padding:16px 18px; border-radius:12px; height:160px; overflow-y:auto; white-space:pre-wrap; word-break:break-all; }
+    #log::-webkit-scrollbar { width:4px; }
+    #log::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.1); border-radius:2px; }
+
+    @keyframes fadeUp { from{opacity:0;transform:translateY(24px)} to{opacity:1;transform:translateY(0)} }
   </style>
 </head>
 <body>
-  <h2>Robot Row Control (Forward/Backward)</h2>
 
-  <div class="card">
-    <h3>Config</h3>
+<div class="sky-bg">
+  <svg class="cloud-svg" viewBox="0 0 320 80"><ellipse cx="160" cy="55" rx="145" ry="30" fill="#c8d8ef"/><ellipse cx="100" cy="45" rx="80" ry="34" fill="#c8d8ef"/><ellipse cx="210" cy="42" rx="90" ry="32" fill="#c8d8ef"/></svg>
+  <svg class="cloud-svg" viewBox="0 0 420 90"><ellipse cx="210" cy="62" rx="190" ry="32" fill="#bdd0ea"/><ellipse cx="130" cy="50" rx="110" ry="40" fill="#bdd0ea"/><ellipse cx="310" cy="46" rx="100" ry="36" fill="#bdd0ea"/></svg>
+  <svg class="cloud-svg" viewBox="0 0 280 70"><ellipse cx="140" cy="48" rx="125" ry="26" fill="#c2d4e8"/><ellipse cx="80" cy="38" rx="75" ry="30" fill="#c2d4e8"/></svg>
+  <svg class="cloud-svg" viewBox="0 0 500 100"><ellipse cx="250" cy="70" rx="230" ry="36" fill="#b8cce0"/><ellipse cx="160" cy="55" rx="140" ry="44" fill="#b8cce0"/><ellipse cx="370" cy="50" rx="120" ry="40" fill="#b8cce0"/></svg>
+</div>
 
-    <div class="row">
+<div class="wrap">
+  <header>
+    <div class="airline-mark">
+      <div class="route">Cabin Navigation System</div>
+      <h1>AERO<span>ROW</span></h1>
+    </div>
+    <div class="conn-badge">
+      <div class="conn-dot" id="connDot"></div>
+      <span id="wsStatus">connecting</span>
+    </div>
+  </header>
+
+  <div class="boarding-pass">
+    <div class="bp-header">
       <div>
-        <label>Row spacing (cm)</label>
-        <input id="rowSpacing" type="number" step="0.01" />
+        <div class="label">Current Position</div>
+        <div class="value" id="currentRowDisplay">—</div>
       </div>
-
-      <div>
-        <label>Current row</label>
-        <input id="currentRow" type="number" step="1" />
-      </div>
-
-      <div>
-        <label>PWM (0–255)</label>
-        <input id="pwm" type="number" step="1" />
-      </div>
-
-      <div>
-        <label>cm/sec (calibration)</label>
-        <input id="cmPerSec" type="number" step="0.1" />
+      <div class="row-badge">
+        <div class="label">System Status</div>
+        <div class="value" id="headerStatus">READY</div>
       </div>
     </div>
 
-    <button onclick="saveConfig()">Save Config</button>
-    <div class="small" id="statusLine">Status: —</div>
+    <div class="flight-path">
+      <div class="fp-city">ROW 01</div>
+      <div class="fp-line">
+        <div class="fp-plane" id="fpPlane">✈</div>
+      </div>
+      <div class="fp-city" id="fpEnd">ROW —</div>
+    </div>
+
+    <div class="bp-body">
+      <div class="row-input-group">
+        <div class="field">
+          <label>Navigate to Row</label>
+          <input id="targetRow" type="number" step="1" placeholder="12" autocomplete="off"/>
+        </div>
+        <button class="btn-go" onclick="gotoRow()">BOARD ✈</button>
+      </div>
+    </div>
+
+    <div class="tear"><div class="tear-line"></div></div>
+
+    <div class="bp-status">
+      <div class="status-tag">Status</div>
+      <div id="statusLine">Awaiting configuration…</div>
+    </div>
   </div>
 
-  <div class="card">
-    <h3>Go to Row</h3>
-    <label>Target row</label>
-    <input id="targetRow" type="number" step="1" />
-    <br />
-    <button onclick="gotoRow()">GO</button>
-    <button onclick="stopNow()">STOP</button>
-    <div class="small" id="resultLine">Result: —</div>
+  <div class="stop-wrap">
+    <button class="btn-stop" onclick="stopNow()">⬛ Emergency Stop</button>
+    <div id="resultLine"></div>
   </div>
 
-  <div class="card">
-    <h3>Arduino Log</h3>
+  <div class="eng-section">
+    <div class="eng-toggle" id="engToggle" onclick="toggleEng()">
+      <div class="line"></div>
+      <span>Engineer Config</span>
+      <div class="eng-arrow" id="engArrow">▼</div>
+      <div class="line"></div>
+    </div>
+    <div class="eng-panel" id="engPanel">
+      <div class="eng-card">
+        <div class="eng-grid">
+          <div class="field"><label>Row Spacing (cm)</label><input id="rowSpacing" type="number" step="0.01" placeholder="0.00"/></div>
+          <div class="field"><label>Current Row</label><input id="currentRow" type="number" step="1" placeholder="0"/></div>
+          <div class="field"><label>PWM (0–255)</label><input id="pwm" type="number" step="1" placeholder="128"/></div>
+          <div class="field"><label>Speed (cm/sec)</label><input id="cmPerSec" type="number" step="0.1" placeholder="0.0"/></div>
+        </div>
+        <div class="eng-footer">
+          <button class="btn-save" onclick="saveConfig()">Save Configuration</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="log-section">
+    <div class="log-header"><span>Flight Data Recorder</span></div>
     <pre id="log"></pre>
   </div>
+</div>
 
 <script>
-const logEl = document.getElementById("log");
-const statusLine = document.getElementById("statusLine");
-const resultLine = document.getElementById("resultLine");
+  const logEl        = document.getElementById("log");
+  const statusLine   = document.getElementById("statusLine");
+  const resultLine   = document.getElementById("resultLine");
+  const wsStatusEl   = document.getElementById("wsStatus");
+  const connDot      = document.getElementById("connDot");
+  const currentRowDi = document.getElementById("currentRowDisplay");
+  const headerStatus = document.getElementById("headerStatus");
+  const fpPlane      = document.getElementById("fpPlane");
+  const fpEnd        = document.getElementById("fpEnd");
+  const MAX_ROW      = 30;
 
-function log(msg) {
-  const t = new Date().toLocaleTimeString();
-  logEl.textContent += `[${t}] ${msg}\n`;
-  logEl.scrollTop = logEl.scrollHeight;
-}
+  function log(msg) {
+    const t = new Date().toLocaleTimeString();
+    logEl.textContent += `[${t}]  ${msg}\n`;
+    logEl.scrollTop = logEl.scrollHeight;
+  }
 
-async function loadConfig() {
-  const r = await fetch("/api/config");
-  const cfg = await r.json();
-  document.getElementById("rowSpacing").value = cfg.row_spacing_cm;
-  document.getElementById("currentRow").value = cfg.current_row;
-  document.getElementById("pwm").value = cfg.pwm;
-  document.getElementById("cmPerSec").value = cfg.cm_per_sec;
-  statusLine.textContent = `Status: ${cfg.last_status} (port=${cfg.serial_port || "auto"})`;
-}
+  function showResult(msg, isStop = false) {
+    resultLine.textContent = msg;
+    resultLine.style.color = isStop ? "var(--stop)" : "var(--deep)";
+    resultLine.classList.add("show");
+  }
 
-async function saveConfig() {
-  const body = {
-    row_spacing_cm: parseFloat(document.getElementById("rowSpacing").value),
-    current_row: parseInt(document.getElementById("currentRow").value, 10),
-    pwm: parseInt(document.getElementById("pwm").value, 10),
-    cm_per_sec: parseFloat(document.getElementById("cmPerSec").value)
-  };
+  function animatePlane(row) {
+    const pct = Math.min(Math.max((row - 1) / (MAX_ROW - 1), 0), 0.92) * 100;
+    fpPlane.style.left = pct + "%";
+  }
 
-  const r = await fetch("/api/config", {
-    method: "POST",
-    headers: {"Content-Type":"application/json"},
-    body: JSON.stringify(body)
-  });
-  const out = await r.json();
-  log("Saved config: " + JSON.stringify(out));
-  await loadConfig();
-}
+  async function loadConfig() {
+    try {
+      const r   = await fetch("/api/config");
+      const cfg = await r.json();
+      document.getElementById("rowSpacing").value = cfg.row_spacing_cm;
+      document.getElementById("currentRow").value  = cfg.current_row;
+      document.getElementById("pwm").value          = cfg.pwm;
+      document.getElementById("cmPerSec").value     = cfg.cm_per_sec;
+      currentRowDi.textContent = "ROW " + String(cfg.current_row).padStart(2,"0");
+      headerStatus.textContent = (cfg.last_status || "READY").toUpperCase().slice(0,12);
+      statusLine.textContent   = `${cfg.last_status || "ready"}  ·  port: ${cfg.serial_port || "auto"}`;
+      fpEnd.textContent        = "ROW " + String(MAX_ROW).padStart(2,"0");
+      animatePlane(cfg.current_row);
+    } catch(e) {
+      statusLine.textContent = "Could not reach backend";
+    }
+  }
 
-async function gotoRow() {
-  const target_row = parseInt(document.getElementById("targetRow").value, 10);
-  const r = await fetch("/api/goto_row", {
-    method: "POST",
-    headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({ target_row })
-  });
-  const out = await r.json();
-  log("GO: " + JSON.stringify(out));
-  resultLine.textContent = "Result: " + JSON.stringify(out);
+  async function saveConfig() {
+    const body = {
+      row_spacing_cm: parseFloat(document.getElementById("rowSpacing").value),
+      current_row:    parseInt(document.getElementById("currentRow").value, 10),
+      pwm:            parseInt(document.getElementById("pwm").value, 10),
+      cm_per_sec:     parseFloat(document.getElementById("cmPerSec").value)
+    };
+    const r   = await fetch("/api/config", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
+    const out = await r.json();
+    log("Config saved · " + JSON.stringify(out));
+    await loadConfig();
+  }
 
-  // Update current row field to match backend state
-  await loadConfig();
-}
+  async function gotoRow() {
+    const target_row = parseInt(document.getElementById("targetRow").value, 10);
+    if (isNaN(target_row)) return;
+    animatePlane(target_row);
+    fpEnd.textContent = "ROW " + String(target_row).padStart(2,"0");
+    const r   = await fetch("/api/goto_row", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({target_row}) });
+    const out = await r.json();
+    log("GO → row " + target_row + "  " + JSON.stringify(out));
+    showResult("Navigating to row " + target_row + " · " + (out.status || JSON.stringify(out)));
+    await loadConfig();
+  }
 
-async function stopNow() {
-  const r = await fetch("/api/stop", { method: "POST" });
-  const out = await r.json();
-  log("STOP: " + JSON.stringify(out));
-  resultLine.textContent = "Result: STOP sent";
-}
+  async function stopNow() {
+    const r   = await fetch("/api/stop", { method:"POST" });
+    const out = await r.json();
+    log("STOP ⬛  " + JSON.stringify(out));
+    showResult("Stop command acknowledged", true);
+  }
 
-(function connectWS() {
-  const ws = new WebSocket(`ws://${location.host}/ws`);
-  ws.onopen = () => log("WS connected");
-  ws.onmessage = (e) => {
-    log("SERIAL: " + e.data);
-    statusLine.textContent = `Status: ${e.data}`;
-  };
-  ws.onclose = () => {
-    log("WS closed, reconnecting...");
-    setTimeout(connectWS, 800);
-  };
-})();
+  function toggleEng() {
+    document.getElementById("engPanel").classList.toggle("open");
+    document.getElementById("engToggle").classList.toggle("open");
+  }
 
-loadConfig();
+  (function connectWS() {
+    const ws = new WebSocket(`ws://${location.host}/ws`);
+    ws.onopen  = () => { wsStatusEl.textContent="live"; connDot.style.background="var(--go)"; log("WebSocket connected"); };
+    ws.onmessage = (e) => { log("SERIAL: "+e.data); statusLine.textContent=e.data; headerStatus.textContent=e.data.toUpperCase().slice(0,12); };
+    ws.onclose = () => { wsStatusEl.textContent="reconnecting…"; connDot.style.background="var(--amber)"; log("WS closed — reconnecting…"); setTimeout(connectWS,800); };
+  })();
+
+  loadConfig();
 </script>
 </body>
 </html>
