@@ -2,8 +2,8 @@
   "row_spacing_cm": 60.96,
   "current_row": 1,
   "home_row": 1,
-  "pwm": 170,
-  "cm_per_sec": 12.2,
+  "pwm": 255,
+  "cm_per_sec": 60.0,
   "serial_port_1": "COM5",
   "serial_port_2": "COM8",
   "baud": 9600

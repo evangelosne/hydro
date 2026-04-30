@@ -197,7 +197,7 @@ async def _grab_loop():
 
 @app.get("/")
 def root():
-    with open("static/index.html", "r", encoding="utf-8") as f:
+    with open("static/hydro_frontend_v2b.html", "r", encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
 

@@ -39,8 +39,8 @@ const int BIN2 = 7;
 const int STBY = 4;
 
 // ---- Safety thresholds ----
-const long STOP_CM = 8;
-const long RESUME_CM = STOP_CM + 3;
+const long STOP_CM = 40;
+const long RESUME_CM = STOP_CM + 5;
 const unsigned long SENSOR_PERIOD_MS = 50;
 const unsigned long DECEL_MS = 1200;
 unsigned long resume_cooldown_ms = 0;

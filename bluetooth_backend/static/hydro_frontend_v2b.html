@@ -1,0 +1,1189 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hydro - Cabin Navigation</title>
+  <style>
+    :root {
+      --bg: #eef4fb;
+      --bg-2: #e2ebf7;
+      --panel: rgba(255,255,255,0.78);
+      --panel-strong: #ffffff;
+      --ink: #111827;
+      --muted: #7f90ad;
+      --line: #c7d4e8;
+      --line-soft: rgba(199,212,232,0.6);
+      --navy: #1d2843;
+      --navy-2: #253352;
+      --amber: #f0aa24;
+      --blue: #2f7cf7;
+      --blue-2: rgba(47,124,247,0.14);
+      --red: #d63a3a;
+      --shadow: 0 24px 60px rgba(25, 38, 67, 0.10);
+      --radius-xl: 28px;
+      --radius-lg: 20px;
+      --radius-md: 14px;
+      --ease: cubic-bezier(.22,1,.36,1);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      --sans: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    html[data-theme="dark"] {
+      --bg: #09111f;
+      --bg-2: #0f1a2b;
+      --panel: rgba(10, 17, 31, 0.84);
+      --panel-strong: #0b1423;
+      --ink: #e8eefb;
+      --muted: #92a2c4;
+      --line: #31415f;
+      --line-soft: rgba(49,65,95,0.58);
+      --navy: #d9e6ff;
+      --navy-2: #b7c6e7;
+      --shadow: 0 28px 70px rgba(0,0,0,0.35);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      font-family: var(--sans);
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 700px at 50% 0%, rgba(255,255,255,0.52), rgba(255,255,255,0) 62%),
+        linear-gradient(180deg, var(--bg), var(--bg-2));
+      overflow-x: hidden;
+      transition: background 400ms var(--ease), color 250ms var(--ease);
+    }
+
+    .ambient {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      overflow: hidden;
+    }
+
+    .ambient::before,
+    .ambient::after {
+      content: "";
+      position: absolute;
+      inset: auto;
+      border-radius: 999px;
+      filter: blur(2px);
+      opacity: 0.55;
+      animation: drift 48s linear infinite;
+      background: rgba(180, 201, 231, 0.42);
+    }
+
+    .ambient::before {
+      width: 340px; height: 84px; left: -120px; top: 13%;
+      box-shadow: 280px 60px 0 0 rgba(180, 201, 231, 0.42), 760px 390px 0 0 rgba(180, 201, 231, 0.28), 1100px 120px 0 0 rgba(180, 201, 231, 0.2);
+    }
+    .ambient::after {
+      width: 420px; height: 100px; left: -200px; top: 66%;
+      box-shadow: 360px -80px 0 0 rgba(180, 201, 231, 0.30), 860px 20px 0 0 rgba(180, 201, 231, 0.22), 1220px -50px 0 0 rgba(180, 201, 231, 0.18);
+      animation-duration: 62s;
+    }
+
+    @keyframes drift { from { transform: translateX(0); } to { transform: translateX(calc(100vw + 700px)); } }
+    @keyframes pulseDot { 0%, 100% { opacity: 0.45; transform: scale(0.92); } 50% { opacity: 1; transform: scale(1.06); } }
+    @keyframes softSweep { 0% { opacity: 0.15; transform: translateX(-10%); } 50% { opacity: 0.34; } 100% { opacity: 0.15; transform: translateX(10%); } }
+
+    .shell {
+      position: relative;
+      z-index: 1;
+      max-width: 1320px;
+      margin: 0 auto;
+      padding: 32px 26px 42px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 22px;
+      flex-wrap: wrap;
+    }
+
+    .brand .kicker {
+      font-family: var(--mono);
+      letter-spacing: 0.28em;
+      text-transform: uppercase;
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    .brand h1 {
+      margin: 0;
+      line-height: 0.92;
+      letter-spacing: 0.05em;
+      font-size: clamp(44px, 5vw, 68px);
+      font-weight: 800;
+      font-family: var(--sans);
+    }
+
+    .brand h1 span { color: var(--amber); }
+
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      margin-left: auto;
+    }
+
+    .telemetry-badge, .theme-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 16px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255,255,255,0.45);
+      color: var(--muted);
+      box-shadow: 0 6px 18px rgba(25,38,67,0.05);
+      backdrop-filter: blur(12px);
+      transition: transform 180ms var(--ease), box-shadow 180ms var(--ease), border-color 180ms var(--ease), background 250ms var(--ease);
+      user-select: none;
+    }
+    html[data-theme="dark"] .telemetry-badge,
+    html[data-theme="dark"] .theme-toggle { background: rgba(7,12,22,0.55); }
+    .theme-toggle { cursor: pointer; }
+    .theme-toggle:hover, .telemetry-badge:hover { transform: translateY(-1px); box-shadow: 0 10px 24px rgba(25,38,67,0.10); }
+    .theme-toggle .icon, .telemetry-badge .icon {
+      width: 30px; height: 30px;
+      border-radius: 50%;
+      display: grid; place-items: center;
+      background: linear-gradient(180deg, rgba(240,170,36,0.18), rgba(47,124,247,0.12));
+      color: var(--amber);
+      font-size: 15px;
+      flex: 0 0 auto;
+    }
+    .telemetry-badge .icon { background: rgba(240,170,36,0.16); animation: pulseDot 1.8s ease-in-out infinite; }
+    .theme-toggle .label, .telemetry-badge .label {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .card {
+      background: var(--panel);
+      backdrop-filter: blur(14px);
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius-xl);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      transition: background 250ms var(--ease), border-color 250ms var(--ease), box-shadow 250ms var(--ease);
+    }
+
+    .mission-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 22px 26px 18px;
+      background: linear-gradient(180deg, rgba(18, 28, 49, 0.98), rgba(22, 32, 54, 0.96));
+      color: #ffffff;
+    }
+
+    .mission-copy .label,
+    .mission-status .label,
+    .section-label,
+    .control-label,
+    .row-label,
+    .status-chip,
+    .subtle,
+    .panel-title,
+    .panel-summary {
+      font-family: var(--mono);
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+    }
+
+    .mission-copy .label,
+    .mission-status .label {
+      color: rgba(232, 238, 251, 0.45);
+      font-size: 11px;
+      margin-bottom: 8px;
+    }
+
+    .mission-copy .value {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+
+    .mission-status { text-align: right; }
+    .mission-status .value {
+      font-size: clamp(34px, 4vw, 54px);
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      color: var(--amber);
+      line-height: 1;
+    }
+
+    .route-shell { position: relative; padding: 24px 24px 8px; }
+    .route-shell::before {
+      content: "";
+      position: absolute;
+      inset: 18px 18px auto;
+      height: 54%;
+      background: radial-gradient(600px 220px at 50% 45%, rgba(47,124,247,0.12), rgba(47,124,247,0) 68%);
+      pointer-events: none;
+    }
+
+    .route-panel {
+      position: relative;
+      border-radius: 22px;
+      overflow: hidden;
+      background: linear-gradient(180deg, rgba(255,255,255,0.70), rgba(255,255,255,0.42));
+      border: 1px solid var(--line-soft);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
+    }
+    html[data-theme="dark"] .route-panel {
+      background: linear-gradient(180deg, rgba(14, 22, 37, 0.68), rgba(10, 16, 28, 0.48));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    }
+
+    .route-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 18px 22px 0;
+      margin-bottom: -2px;
+      pointer-events: none;
+    }
+    .route-meta .side {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.18em;
+      color: var(--muted);
+    }
+
+    .map-wrap { padding: 12px 12px 18px; }
+    svg { width: 100%; height: auto; display: block; }
+
+    .cabin-outline { fill: url(#cabinGlow); stroke: var(--line); stroke-width: 2.2; }
+    .cabin-sheen { fill: none; stroke: rgba(255,255,255,0.22); stroke-width: 1.5; opacity: 0.9; }
+    .cabin-track { stroke: rgba(199,212,232,0.45); stroke-width: 1.4; }
+    .route-base { fill: none; stroke: rgba(47,124,247,0.16); stroke-width: 10; stroke-linecap: round; }
+    .route-progress { fill: none; stroke: url(#routeGradient); stroke-width: 10; stroke-linecap: round; filter: url(#softGlow); }
+    .route-pulse { fill: none; stroke: rgba(255,255,255,0.14); stroke-width: 16; stroke-linecap: round; animation: softSweep 2.4s ease-in-out infinite; }
+
+    .cabin-row-line { stroke: rgba(199,212,232,0.52); stroke-width: 1.15; }
+    .row-marker { fill: var(--muted); font-size: 10px; }
+    .row-marker.major { fill: var(--muted); font-size: 12px; }
+    .row-marker.current { fill: var(--blue); }
+    .row-marker.target { fill: var(--amber); }
+    .station-dot { fill: #fff; stroke: var(--line); stroke-width: 2; transition: fill 240ms var(--ease), stroke 240ms var(--ease), transform 240ms var(--ease), opacity 240ms var(--ease); }
+    .station-dot.passed { fill: var(--blue); stroke: var(--blue); }
+    .station-dot.current { fill: #ffffff; stroke: var(--blue); }
+    .station-dot.target { fill: var(--amber); stroke: var(--amber); }
+
+    .seat rect,
+    .seat path,
+    .seat circle,
+    .seat line { transition: fill 220ms var(--ease), stroke 220ms var(--ease), opacity 220ms var(--ease), transform 220ms var(--ease); }
+    .seat .back { fill: rgba(255,255,255,0.76); stroke: var(--line); stroke-width: 1.1; }
+    .seat .base { fill: rgba(255,255,255,0.56); stroke: var(--line); stroke-width: 1; }
+    .seat .head { fill: rgba(255,255,255,0.82); stroke: var(--line); stroke-width: 1; }
+    .seat.passed .back, .seat.passed .base, .seat.passed .head { fill: rgba(47,124,247,0.10); stroke: rgba(47,124,247,0.34); }
+    .seat.current .back, .seat.current .base, .seat.current .head { fill: rgba(47,124,247,0.14); stroke: var(--blue); }
+    .seat.target .back, .seat.target .base, .seat.target .head { fill: rgba(240,170,36,0.15); stroke: var(--amber); }
+
+    .robot-shadow { fill: rgba(24,40,72,0.12); filter: blur(8px); }
+    .robot-body { fill: #f7faff; stroke: var(--blue); stroke-width: 2.4; }
+    .robot-window { fill: rgba(47,124,247,0.12); stroke: rgba(47,124,247,0.18); stroke-width: 1; }
+    .robot-roof { fill: var(--amber); }
+    .robot-wheel { fill: var(--blue); }
+    .robot-light { fill: rgba(240,170,36,0.32); }
+    .robot-badge { fill: rgba(47,124,247,0.09); stroke: rgba(47,124,247,0.18); stroke-width: 1; }
+    .trail-dot { fill: rgba(47,124,247,0.55); filter: url(#softGlow); }
+
+    .controls {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 14px;
+      align-items: end;
+      padding: 12px 24px 18px;
+    }
+
+    .control-label {
+      display: block;
+      font-size: 10px;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    .input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255,255,255,0.58);
+      color: var(--ink);
+      padding: 18px 18px 16px;
+      font: 700 38px/1 var(--sans);
+      letter-spacing: 0.04em;
+      outline: none;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
+      transition: border-color 180ms var(--ease), box-shadow 180ms var(--ease), transform 180ms var(--ease), background 250ms var(--ease);
+    }
+    html[data-theme="dark"] .input { background: rgba(255,255,255,0.05); }
+    .input:focus { border-color: var(--blue); box-shadow: 0 0 0 4px var(--blue-2); }
+
+    .board-btn, .stop-btn, .ghost-btn {
+      border: 0;
+      border-radius: 18px;
+      font-family: var(--sans);
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: transform 160ms var(--ease), box-shadow 160ms var(--ease), filter 160ms var(--ease), background 220ms var(--ease), border-color 220ms var(--ease);
+    }
+
+    .board-btn {
+      min-width: 210px;
+      height: 86px;
+      color: #fff;
+      background: linear-gradient(180deg, #2f7cf7, #2266d8);
+      box-shadow: 0 18px 38px rgba(47,124,247,0.24);
+      font-size: 20px;
+    }
+    .board-btn:hover { transform: translateY(-1px); box-shadow: 0 20px 44px rgba(47,124,247,0.30); }
+    .board-btn:active { transform: translateY(1px) scale(0.99); }
+    .board-btn.busy { filter: saturate(0.95) brightness(0.98); }
+
+    .support {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 24px 16px;
+      flex-wrap: wrap;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.45);
+      font: 600 11px/1 var(--mono);
+      letter-spacing: 0.12em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+    html[data-theme="dark"] .chip { background: rgba(255,255,255,0.03); }
+
+    .status-line {
+      flex: 1 1 340px;
+      min-width: 0;
+      font: 600 13px/1.45 var(--sans);
+      color: var(--ink);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .emergency-wrap { padding: 0 24px 18px; }
+    .stop-btn {
+      width: 100%;
+      min-height: 82px;
+      border: 2px solid var(--red);
+      background: linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.05));
+      color: var(--red);
+      box-shadow: 0 12px 30px rgba(214,58,58,0.08);
+      font-size: 20px;
+      position: relative;
+      overflow: hidden;
+    }
+    .stop-btn::before {
+      content: "";
+      position: absolute;
+      inset: -40% -20%;
+      background: radial-gradient(circle, rgba(214,58,58,0.16), rgba(214,58,58,0) 58%);
+      opacity: 0;
+      transition: opacity 180ms var(--ease);
+    }
+    .stop-btn:hover::before { opacity: 1; }
+    .stop-btn:hover { transform: translateY(-1px); }
+    .stop-btn:active { transform: translateY(1px) scale(0.995); }
+    .stop-btn.active {
+      box-shadow: 0 0 0 5px rgba(214,58,58,0.10), 0 12px 30px rgba(214,58,58,0.18);
+      background: linear-gradient(180deg, rgba(214,58,58,0.10), rgba(214,58,58,0.03));
+    }
+
+    .lower-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+      gap: 16px;
+      padding: 0 24px 24px;
+    }
+
+    details.engineer {
+      background: rgba(255,255,255,0.52);
+      border: 1px solid var(--line-soft);
+      border-radius: 22px;
+      overflow: hidden;
+    }
+    html[data-theme="dark"] details.engineer { background: rgba(255,255,255,0.03); }
+    details.engineer > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 18px 18px 16px;
+      font: 700 12px/1 var(--mono);
+      letter-spacing: 0.20em;
+      text-transform: uppercase;
+      color: var(--muted);
+      border-bottom: 1px solid rgba(199,212,232,0.45);
+      position: relative;
+    }
+    details.engineer > summary::-webkit-details-marker { display: none; }
+    details.engineer > summary::after {
+      content: "▼";
+      position: absolute;
+      right: 18px;
+      top: 18px;
+      font-size: 10px;
+      opacity: 0.7;
+    }
+    details.engineer[open] > summary::after { content: "▲"; }
+    .engine-body { padding: 18px; display: grid; gap: 14px; }
+    .engine-form {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px 18px;
+      align-items: start;
+    }
+    .engine-field { display: grid; gap: 8px; }
+    .engine-field .name {
+      font: 700 11px/1.2 var(--mono);
+      letter-spacing: 0.16em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+    .engine-input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255,255,255,0.52);
+      color: var(--ink);
+      padding: 16px 18px 14px;
+      font: 700 30px/1 var(--sans);
+      letter-spacing: 0.05em;
+      outline: none;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
+      transition: border-color 180ms var(--ease), box-shadow 180ms var(--ease), transform 180ms var(--ease), background 250ms var(--ease);
+      appearance: textfield;
+    }
+    .engine-input::-webkit-outer-spin-button,
+    .engine-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    html[data-theme="dark"] .engine-input { background: rgba(10,17,31,0.26); }
+    .engine-input:focus { border-color: var(--blue); box-shadow: 0 0 0 4px var(--blue-2); }
+    .engine-input[readonly] { cursor: default; opacity: 0.88; }
+    .engine-actions { display: flex; justify-content: flex-end; }
+    .save-config-btn {
+      min-width: 260px;
+      height: 70px;
+      padding: 0 24px;
+      border: 0;
+      border-radius: 18px;
+      font-family: var(--sans);
+      font-weight: 800;
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+      cursor: pointer;
+      color: #fff;
+      background: linear-gradient(180deg, #1d2843, #223053);
+      box-shadow: 0 16px 34px rgba(25,38,67,0.18);
+      transition: transform 160ms var(--ease), box-shadow 160ms var(--ease), filter 160ms var(--ease), background 220ms var(--ease);
+    }
+    .save-config-btn:hover { transform: translateY(-1px); box-shadow: 0 20px 42px rgba(25,38,67,0.24); }
+    .save-config-btn:active { transform: translateY(1px) scale(0.99); }
+    .save-config-btn.busy { filter: saturate(0.95) brightness(0.98); }
+
+    .fdr {
+      background: rgba(18, 28, 49, 0.96);
+      border: 1px solid rgba(199,212,232,0.18);
+      border-radius: 22px;
+      color: #dbe6ff;
+      overflow: hidden;
+    }
+    .fdr-head {
+      display: flex; justify-content: space-between; align-items: center; gap: 12px;
+      padding: 18px 18px 16px;
+      border-bottom: 1px solid rgba(199,212,232,0.14);
+    }
+    .fdr-head .title { font: 700 12px/1 var(--mono); letter-spacing: 0.20em; text-transform: uppercase; color: rgba(219,230,255,0.72); }
+    .fdr-head .sub { font: 600 11px/1 var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: rgba(219,230,255,0.42); }
+    .fdr-list { list-style: none; margin: 0; padding: 12px 18px 18px; display: grid; gap: 10px; max-height: 220px; overflow: auto; }
+    .fdr-list li {
+      display: flex; gap: 12px; align-items: flex-start;
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    .fdr-time { font: 700 11px/1.4 var(--mono); letter-spacing: 0.14em; color: #f0aa24; min-width: 64px; }
+    .fdr-text { font-size: 13px; line-height: 1.45; color: rgba(219,230,255,0.92); }
+
+    .footer-note {
+      padding: 0 24px 18px;
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.16em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .screen-flash {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: rgba(214,58,58,0.18);
+      opacity: 0;
+      transition: opacity 140ms var(--ease);
+      z-index: 2;
+    }
+    .screen-flash.active { opacity: 1; }
+
+    @media (max-width: 980px) {
+      .lower-grid { grid-template-columns: 1fr; }
+      .controls { grid-template-columns: 1fr; }
+      .board-btn { width: 100%; min-width: 0; }
+      .mission-head { flex-direction: column; }
+      .mission-status { text-align: left; }
+      .topbar-right { margin-left: 0; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"></div>
+  <div id="screenFlash" class="screen-flash" aria-hidden="true"></div>
+  <main class="shell">
+    <div class="topbar">
+      <div class="brand">
+        <div class="kicker">Cabin Navigation System</div>
+        <h1>HYDRO</span></h1>
+      </div>
+      <div class="topbar-right">
+        <div id="connectionBadge" class="telemetry-badge" aria-label="connection status">
+          <span class="icon">●</span>
+          <span class="label">reconnecting...</span>
+        </div>
+        <button id="themeToggle" class="theme-toggle" type="button" aria-pressed="false">
+          <span id="themeIcon" class="icon">☀</span>
+          <span id="themeLabel" class="label">Day Flight</span>
+        </button>
+      </div>
+    </div>
+
+    <section class="card" aria-label="Cabin route control panel">
+      <div class="mission-head">
+        <div class="mission-copy">
+          <div class="label">Current Position</div>
+          <div id="currentPosition" class="value">Row 01</div>
+        </div>
+        <div class="mission-status">
+          <div class="label">System Status</div>
+          <div id="systemStatus" class="value">READY</div>
+        </div>
+      </div>
+
+      <div class="route-shell">
+        <div class="route-panel">
+          <div class="route-meta">
+            <div id="frontLabel" class="side">Front Galley</div>
+            <div id="missionLabel" class="side">Target Row 12</div>
+            <div id="aftLabel" class="side">Aft Cabin</div>
+          </div>
+
+          <div class="map-wrap">
+            <svg id="cabinSvg" viewBox="0 0 1180 360" role="img" aria-label="Cabin seat map and robot path">
+              <defs>
+                <linearGradient id="cabinGlow" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="rgba(255,255,255,0.72)" />
+                  <stop offset="100%" stop-color="rgba(255,255,255,0.26)" />
+                </linearGradient>
+                <linearGradient id="routeGradient" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stop-color="#2f7cf7" stop-opacity="0.18" />
+                  <stop offset="60%" stop-color="#2f7cf7" stop-opacity="0.95" />
+                  <stop offset="100%" stop-color="#f0aa24" stop-opacity="0.95" />
+                </linearGradient>
+                <filter id="softGlow" x="-40%" y="-40%" width="180%" height="180%">
+                  <feGaussianBlur stdDeviation="4" result="blur" />
+                  <feMerge>
+                    <feMergeNode in="blur" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+                <filter id="robotGlow" x="-60%" y="-60%" width="220%" height="220%">
+                  <feGaussianBlur stdDeviation="5" result="blur" />
+                  <feMerge>
+                    <feMergeNode in="blur" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+              </defs>
+
+              <rect x="44" y="64" width="1092" height="228" rx="44" ry="44" class="cabin-outline"></rect>
+              <rect x="64" y="86" width="1052" height="184" rx="34" ry="34" class="cabin-sheen"></rect>
+              <line x1="112" y1="180" x2="1068" y2="180" class="route-pulse"></line>
+              <line id="routeBase" x1="112" y1="180" x2="1068" y2="180" class="route-base"></line>
+              <line id="routeProgress" x1="112" y1="180" x2="112" y2="180" class="route-progress"></line>
+              <g id="rowsLayer"></g>
+              <g id="trailLayer"></g>
+              <g id="robotLayer"></g>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <label style="display:block; min-width:0;">
+          <span class="control-label">Navigate to Row</span>
+          <input id="targetRow" class="input" type="number" min="1" max="30" step="1" inputmode="numeric" value="12" autocomplete="off" />
+        </label>
+        <button id="boardBtn" class="board-btn" type="button">Board ✈</button>
+      </div>
+
+      <div class="emergency-wrap">
+        <button id="emergencyBtn" class="stop-btn" type="button">Emergency Stop</button>
+      </div>
+
+      <div class="support">
+        <div id="statusLine" class="status-line">Ready to taxi.</div>
+      </div>
+
+      <div class="lower-grid">
+        <details class="engineer" open>
+          <summary>Engineer Config</summary>
+          <div class="engine-body">
+            <div class="engine-form">
+              <label class="engine-field" for="engineRowSpacing">
+                <span class="name">Row Spacing (cm)</span>
+                <input id="engineRowSpacing" class="engine-input" type="number" min="0" step="0.01" inputmode="decimal" value="78.00" autocomplete="off" />
+              </label>
+              <label class="engine-field" for="engineCurrentRow">
+                <span class="name">Current Row</span>
+                <input id="engineCurrentRow" class="engine-input" type="number" min="1" max="30" step="1" inputmode="numeric" value="1" readonly />
+              </label>
+              <label class="engine-field" for="enginePwm">
+                <span class="name">PWM (0-255)</span>
+                <input id="enginePwm" class="engine-input" type="number" min="0" max="255" step="1" inputmode="numeric" value="220" autocomplete="off" />
+              </label>
+              <label class="engine-field" for="engineSpeed">
+                <span class="name">Speed (cm/sec)</span>
+                <input id="engineSpeed" class="engine-input" type="number" min="0" step="0.1" inputmode="decimal" value="0.0" autocomplete="off" />
+              </label>
+            </div>
+            <div class="engine-actions">
+              <button id="saveConfigBtn" class="save-config-btn" type="button">Save Configuration</button>
+            </div>
+          </div>
+        </details>
+
+        <section class="fdr" aria-label="flight data recorder">
+          <div class="fdr-head">
+            <div>
+              <div class="title">Flight Data Recorder</div>
+              <div class="sub">Recent cabin events</div>
+            </div>
+            <div class="sub" id="fdrCount">0 events</div>
+          </div>
+          <ul id="fdrList" class="fdr-list"></ul>
+        </section>
+      </div>
+
+      <div class="footer-note">Press Board to animate the delivery robot from the galley to the selected row.</div>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      'use strict';
+
+      const MAX_ROW = 30;
+      const START_X = 112;
+      const END_X = 1068;
+      const TRACK_Y = 180;
+      const ROW_GAP = (END_X - START_X) / (MAX_ROW - 1);
+      const THEME_KEY = 'aerorow-theme';
+      const MOTION_MS_BASE = 1100;
+      const MOTION_MS_PER_ROW = 36;
+      const REDUCED_MOTION = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const raf = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : (cb) => window.setTimeout(() => cb(Date.now()), 16);
+      const caf = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : window.clearTimeout.bind(window);
+      const now = () => (window.performance && typeof window.performance.now === 'function' ? window.performance.now() : Date.now());
+
+      const el = {
+        themeToggle: document.getElementById('themeToggle'),
+        themeIcon: document.getElementById('themeIcon'),
+        themeLabel: document.getElementById('themeLabel'),
+        connectionBadge: document.getElementById('connectionBadge'),
+        currentPosition: document.getElementById('currentPosition'),
+        systemStatus: document.getElementById('systemStatus'),
+        missionLabel: document.getElementById('missionLabel'),
+        statusLine: document.getElementById('statusLine'),
+        targetRow: document.getElementById('targetRow'),
+        boardBtn: document.getElementById('boardBtn'),
+        emergencyBtn: document.getElementById('emergencyBtn'),
+        engineRowSpacing: document.getElementById('engineRowSpacing'),
+        engineCurrentRow: document.getElementById('engineCurrentRow'),
+        enginePwm: document.getElementById('enginePwm'),
+        engineSpeed: document.getElementById('engineSpeed'),
+        saveConfigBtn: document.getElementById('saveConfigBtn'),
+        rowsLayer: document.getElementById('rowsLayer'),
+        trailLayer: document.getElementById('trailLayer'),
+        robotLayer: document.getElementById('robotLayer'),
+        routeProgress: document.getElementById('routeProgress'),
+        routeBase: document.getElementById('routeBase'),
+        fdrList: document.getElementById('fdrList'),
+        fdrCount: document.getElementById('fdrCount'),
+        screenFlash: document.getElementById('screenFlash')
+      };
+
+      const state = {
+        theme: 'light',
+        currentRow: 1,
+        targetRow: 12,
+        animating: false,
+        motionX: START_X,
+        robotX: START_X,
+        animationToken: 0,
+        rafId: 0,
+        busy: false,
+        emergency: false,
+        log: [],
+        engineer: {
+          rowSpacingCm: 78.0,
+          pwm: 220,
+          speedCmSec: 0.0
+        }
+      };
+
+      function clampRow(value) {
+        const n = Number(value);
+        if (!Number.isFinite(n)) return 1;
+        return Math.min(Math.max(Math.round(n), 1), MAX_ROW);
+      }
+
+      function padRow(value) {
+        return String(clampRow(value)).padStart(2, '0');
+      }
+
+      function rowToX(row) {
+        return START_X + (clampRow(row) - 1) * ROW_GAP;
+      }
+
+      function xToRow(x) {
+        const pct = (x - START_X) / (END_X - START_X);
+        return 1 + Math.min(Math.max(pct, 0), 1) * (MAX_ROW - 1);
+      }
+
+      function easeInOutCubic(t) {
+        return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      }
+
+      function setStatus(text) {
+        if (el.statusLine) el.statusLine.textContent = text;
+      }
+
+      function setBusy(isBusy) {
+        state.busy = isBusy;
+        if (el.boardBtn) el.boardBtn.classList.toggle('busy', isBusy);
+        if (el.targetRow) el.targetRow.disabled = isBusy;
+      }
+
+      function addLog(text) {
+        const stamp = new Date();
+        const hh = String(stamp.getHours()).padStart(2, '0');
+        const mm = String(stamp.getMinutes()).padStart(2, '0');
+        const ss = String(stamp.getSeconds()).padStart(2, '0');
+        state.log.unshift({ time: `${hh}:${mm}:${ss}`, text: String(text) });
+        state.log = state.log.slice(0, 7);
+        if (el.fdrList) {
+          el.fdrList.innerHTML = state.log.map((entry) => `<li><span class="fdr-time">${entry.time}</span><span class="fdr-text">${entry.text}</span></li>`).join('');
+        }
+        if (el.fdrCount) el.fdrCount.textContent = `${state.log.length} event${state.log.length === 1 ? '' : 's'}`;
+      }
+
+      function updateEngineerFields() {
+        if (el.engineRowSpacing) el.engineRowSpacing.value = Number(state.engineer.rowSpacingCm).toFixed(2);
+        if (el.engineCurrentRow) el.engineCurrentRow.value = String(clampRow(state.currentRow));
+        if (el.enginePwm) el.enginePwm.value = String(Math.min(255, Math.max(0, Math.round(state.engineer.pwm))));
+        if (el.engineSpeed) el.engineSpeed.value = Number(state.engineer.speedCmSec).toFixed(1);
+      }
+
+      async function loadConfig() {
+        try {
+          const r = await fetch('/api/config');
+          const cfg = await r.json();
+          // currentRow intentionally NOT read from backend — always starts at row 1
+          state.engineer.rowSpacingCm = cfg.row_spacing_cm ?? state.engineer.rowSpacingCm;
+          state.engineer.pwm = cfg.pwm ?? state.engineer.pwm;
+          state.engineer.speedCmSec = cfg.cm_per_sec ?? state.engineer.speedCmSec;
+          updateEngineerFields();
+          paintMap();
+          const status = cfg.last_status || 'ready';
+          setStatus(`${status}  ·  port: ${cfg.serial_port || 'auto'}`);
+          addLog(`Config loaded — port: ${cfg.serial_port || 'auto'}`);
+        } catch (e) {
+          setStatus('Could not reach backend.');
+          addLog('ERROR: Could not reach backend.');
+        }
+      }
+
+      async function saveEngineerConfig() {
+        const rowSpacing = Number.parseFloat(el.engineRowSpacing && el.engineRowSpacing.value);
+        const pwm = Number.parseInt(el.enginePwm && el.enginePwm.value, 10);
+        const speed = Number.parseFloat(el.engineSpeed && el.engineSpeed.value);
+        state.engineer.rowSpacingCm = Number.isFinite(rowSpacing) && rowSpacing >= 0 ? rowSpacing : state.engineer.rowSpacingCm;
+        state.engineer.pwm = Number.isFinite(pwm) ? Math.min(255, Math.max(0, pwm)) : state.engineer.pwm;
+        state.engineer.speedCmSec = Number.isFinite(speed) && speed >= 0 ? speed : state.engineer.speedCmSec;
+        updateEngineerFields();
+        try {
+          const body = {
+            row_spacing_cm: state.engineer.rowSpacingCm,
+            current_row: clampRow(state.currentRow),
+            pwm: state.engineer.pwm,
+            cm_per_sec: state.engineer.speedCmSec
+          };
+          const r = await fetch('/api/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+          });
+          const out = await r.json();
+          addLog('Config saved · ' + JSON.stringify(out));
+          setStatus('Engineering configuration saved.');
+          await loadConfig();
+        } catch (e) {
+          addLog('ERROR: Failed to save config.');
+          setStatus('Failed to save config — backend unreachable.');
+        }
+      }
+
+      function flashEmergency() {
+        if (!el.screenFlash) return;
+        el.screenFlash.classList.add('active');
+        window.setTimeout(() => el.screenFlash.classList.remove('active'), 170);
+      }
+
+      function createSeatIcon(x, y, side) {
+        const flip = side === 'right' ? ' scale(-1,1)' : '';
+        return `
+          <g class="seat" transform="translate(${x} ${y})${flip}">
+            <rect class="back" x="0" y="-10" width="16" height="11" rx="4"></rect>
+            <rect class="base" x="4" y="0" width="12" height="15" rx="4"></rect>
+            <rect class="head" x="4" y="-12" width="12" height="4" rx="2"></rect>
+          </g>`;
+      }
+
+      function createRobotMarkup() {
+        return `
+          <g id="robotGroup" transform="translate(${START_X} ${TRACK_Y})">
+            <ellipse class="robot-shadow" cx="0" cy="22" rx="32" ry="8"></ellipse>
+            <g filter="url(#robotGlow)">
+              <rect class="robot-body" x="-28" y="-15" width="56" height="30" rx="8"></rect>
+              <rect class="robot-window" x="-15" y="-8" width="30" height="10" rx="5"></rect>
+              <rect class="robot-roof" x="-11" y="-20" width="22" height="7" rx="3.5"></rect>
+              <rect class="robot-badge" x="-23" y="-5" width="6" height="6" rx="2"></rect>
+              <rect class="robot-badge" x="17" y="-5" width="6" height="6" rx="2"></rect>
+              <circle class="robot-light" cx="-21" cy="3" r="2.8"></circle>
+              <circle class="robot-light" cx="21" cy="3" r="2.8"></circle>
+              <circle class="robot-wheel" cx="-18" cy="17" r="4.4"></circle>
+              <circle class="robot-wheel" cx="18" cy="17" r="4.4"></circle>
+            </g>
+          </g>`;
+      }
+
+      function buildCabinMap() {
+        if (!el.rowsLayer || !el.trailLayer || !el.robotLayer) return;
+        const parts = [];
+        for (let row = 1; row <= MAX_ROW; row += 1) {
+          const x = rowToX(row);
+          const major = row === 1 || row === MAX_ROW || row % 5 === 0;
+          parts.push(`
+            <g class="cabin-row" data-row="${row}" transform="translate(${x} 0)">
+              <line class="cabin-row-line" x1="0" y1="126" x2="0" y2="234"></line>
+              <text class="row-marker${major ? ' major' : ''}" x="0" y="116" text-anchor="middle">${padRow(row)}</text>
+              ${createSeatIcon(-19, 150, 'left')}
+              ${createSeatIcon(-19, 210, 'left')}
+              ${createSeatIcon(19, 150, 'right')}
+              ${createSeatIcon(19, 210, 'right')}
+              <circle class="station-dot" data-dot="${row}" cx="0" cy="180" r="${major ? 7 : 5}"></circle>
+            </g>`);
+        }
+        el.rowsLayer.innerHTML = parts.join('');
+        el.trailLayer.innerHTML = `
+          <g id="trailDots">
+            <circle class="trail-dot" cx="${START_X}" cy="180" r="3.8" opacity="0.58"></circle>
+            <circle class="trail-dot" cx="${START_X}" cy="180" r="3.1" opacity="0.42"></circle>
+            <circle class="trail-dot" cx="${START_X}" cy="180" r="2.4" opacity="0.28"></circle>
+            <circle class="trail-dot" cx="${START_X}" cy="180" r="1.8" opacity="0.18"></circle>
+          </g>`;
+        el.robotLayer.innerHTML = createRobotMarkup();
+      }
+
+      function paintMap(progressX = state.motionX, robotX = state.robotX) {
+        const rows = el.rowsLayer ? el.rowsLayer.querySelectorAll('.cabin-row') : [];
+        const current = clampRow(state.currentRow);
+        const target = clampRow(state.targetRow);
+        const progressRow = xToRow(progressX);
+        const displayRow = state.animating ? progressRow : current;
+
+        rows.forEach((rowEl) => {
+          const rowNum = clampRow(rowEl.getAttribute('data-row'));
+          const passed = rowNum < displayRow - 0.15;
+          const active = Math.abs(rowNum - displayRow) <= 0.52;
+          const isTarget = rowNum === target;
+          rowEl.querySelectorAll('.seat').forEach((seat) => {
+            seat.classList.toggle('passed', passed);
+            seat.classList.toggle('current', active);
+            seat.classList.toggle('target', isTarget);
+          });
+          const dot = rowEl.querySelector('.station-dot');
+          if (dot) {
+            dot.classList.toggle('passed', passed);
+            dot.classList.toggle('current', active);
+            dot.classList.toggle('target', isTarget);
+          }
+          const label = rowEl.querySelector('.row-marker');
+          if (label) {
+            label.classList.toggle('current', active);
+            label.classList.toggle('target', isTarget);
+          }
+        });
+
+        if (el.routeProgress) {
+          el.routeProgress.setAttribute('x1', START_X);
+          el.routeProgress.setAttribute('y1', TRACK_Y);
+          el.routeProgress.setAttribute('x2', Math.min(Math.max(progressX, START_X), END_X));
+          el.routeProgress.setAttribute('y2', TRACK_Y);
+        }
+        if (el.routeBase) {
+          el.routeBase.setAttribute('x1', START_X);
+          el.routeBase.setAttribute('y1', TRACK_Y);
+          el.routeBase.setAttribute('x2', END_X);
+          el.routeBase.setAttribute('y2', TRACK_Y);
+        }
+
+        const trail = el.trailLayer ? el.trailLayer.querySelectorAll('.trail-dot') : [];
+        const sway = state.animating ? Math.sin(((progressX - START_X) / (END_X - START_X)) * Math.PI * 8) * 2.8 : 0;
+        const bob = state.animating ? Math.sin(((progressX - START_X) / (END_X - START_X)) * Math.PI * 4) * 1.8 : 0;
+        if (trail.length) {
+          const offsets = [18, 30, 42, 56];
+          trail.forEach((dot, index) => {
+            const x = Math.min(END_X, Math.max(START_X, robotX - offsets[index]));
+            dot.setAttribute('cx', x.toFixed(2));
+            dot.setAttribute('cy', TRACK_Y.toFixed(2));
+            dot.setAttribute('opacity', String([0.58, 0.42, 0.28, 0.18][index] * (state.animating ? 1 : 0.2)));
+          });
+        }
+        const robotGroup = document.getElementById('robotGroup');
+        if (robotGroup) {
+          robotGroup.setAttribute('transform', `translate(${robotX + sway} ${TRACK_Y + bob})`);
+        }
+
+        if (el.currentPosition) el.currentPosition.textContent = `Row ${padRow(current)}`;
+        if (el.missionLabel) el.missionLabel.textContent = `Target Row ${padRow(target)}`;
+        if (el.engineCurrentRow) el.engineCurrentRow.value = String(clampRow(current));
+        if (el.systemStatus) el.systemStatus.textContent = state.emergency ? 'EMERGENCY' : (state.animating ? 'TAXIING' : (state.busy ? 'HOLD' : 'READY'));
+        if (el.connectionBadge) {
+          const label = state.busy ? 'syncing...' : 'reconnecting...';
+          el.connectionBadge.querySelector('.label').textContent = label;
+        }
+      }
+
+      function finishMission() {
+        state.animating = false;
+        state.motionX = rowToX(state.currentRow);
+        state.robotX = state.motionX;
+        setBusy(false);
+        paintMap();
+        setStatus(`Arrived at row ${padRow(state.currentRow)}.`);
+        addLog(`Arrived at row ${padRow(state.currentRow)}.`);
+      }
+
+      function stopMission(freezeToCurrent = true) {
+        state.animationToken += 1;
+        if (state.rafId) caf(state.rafId);
+        state.rafId = 0;
+        state.animating = false;
+        setBusy(false);
+        state.emergency = true;
+        if (freezeToCurrent) {
+          const frozen = clampRow(xToRow(state.motionX));
+          state.currentRow = frozen;
+          state.motionX = rowToX(frozen);
+          state.robotX = state.motionX;
+        }
+        if (el.emergencyBtn) el.emergencyBtn.classList.add('active');
+        if (el.systemStatus) el.systemStatus.textContent = 'EMERGENCY';
+        paintMap();
+      }
+
+      function animateToRow(targetRow) {
+        const target = clampRow(targetRow);
+        state.targetRow = target;
+        state.emergency = false;
+        if (el.emergencyBtn) el.emergencyBtn.classList.remove('active');
+        if (state.animating) stopMission(false);
+        state.animating = true;
+        setBusy(true);
+        setStatus(`Taxiing to row ${padRow(target)}.`);
+        addLog(`Board command received for row ${padRow(target)}.`);
+
+        const startX = state.motionX;
+        const endX = rowToX(target);
+        const startTime = now();
+        const distance = Math.abs(target - state.currentRow);
+        const duration = REDUCED_MOTION ? 0 : Math.max(MOTION_MS_BASE, MOTION_MS_BASE + distance * MOTION_MS_PER_ROW);
+        const token = ++state.animationToken;
+
+        if (duration === 0) {
+          state.currentRow = target;
+          state.motionX = endX;
+          state.robotX = endX;
+          finishMission();
+          return Promise.resolve();
+        }
+
+        return new Promise((resolve) => {
+          const step = (ts) => {
+            if (token !== state.animationToken) {
+              resolve();
+              return;
+            }
+            const t = Math.min((ts - startTime) / duration, 1);
+            const eased = easeInOutCubic(t);
+            state.motionX = startX + (endX - startX) * eased;
+            state.robotX = state.motionX;
+            paintMap(state.motionX, state.robotX);
+            if (t < 1) {
+              state.rafId = raf(step);
+            } else {
+              state.currentRow = target;
+              state.motionX = endX;
+              state.robotX = endX;
+              finishMission();
+              resolve();
+            }
+          };
+          state.rafId = raf(step);
+        });
+      }
+
+      function applyTheme(nextTheme) {
+        state.theme = nextTheme === 'dark' ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', state.theme);
+        if (el.themeIcon) el.themeIcon.textContent = state.theme === 'dark' ? '☾' : '☀';
+        if (el.themeLabel) el.themeLabel.textContent = state.theme === 'dark' ? 'Night Flight' : 'Day Flight';
+        if (el.themeToggle) el.themeToggle.setAttribute('aria-pressed', String(state.theme === 'dark'));
+        try { localStorage.setItem(THEME_KEY, state.theme); } catch (err) {}
+      }
+
+      function initTheme() {
+        let saved = null;
+        try { saved = localStorage.getItem(THEME_KEY); } catch (err) {}
+        if (saved !== 'light' && saved !== 'dark') {
+          saved = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        applyTheme(saved);
+      }
+
+      function onBoard() {
+        if (state.busy) return;
+        const raw = Number.parseInt(el.targetRow && el.targetRow.value, 10);
+        if (!Number.isFinite(raw)) {
+          setStatus('Enter a valid row number.');
+          return;
+        }
+        const target = clampRow(raw);
+        if (el.targetRow) el.targetRow.value = String(target);
+        state.emergency = false;
+
+        // Fire API call immediately — animation is visual only, runs in parallel
+        fetch('/api/goto_row', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target_row: target })
+        }).then((r) => r.json()).then(async (out) => {
+          addLog('GO \u2192 row ' + padRow(target) + '  ' + JSON.stringify(out));
+          await loadConfig();
+        }).catch(() => {
+          addLog('ERROR: goto_row request failed.');
+        });
+
+        animateToRow(target).catch(() => {});
+      }
+
+      async function onEmergencyStop() {
+        stopMission(true);
+        if (el.targetRow) el.targetRow.disabled = false;
+        setStatus(`Emergency stop engaged at row ${padRow(state.currentRow)}.`);
+        addLog(`Emergency stop engaged at row ${padRow(state.currentRow)}.`);
+        flashEmergency();
+        try {
+          const r = await fetch("/api/stop", { method: "POST" });
+          const out = await r.json();
+          addLog("STOP confirmed u25A0  " + JSON.stringify(out));
+        } catch (e) {
+          addLog("ERROR: stop request failed.");
+        }
+      }
+
+      buildCabinMap();
+      initTheme();
+      state.motionX = rowToX(state.currentRow);
+      state.robotX = state.motionX;
+      paintMap();
+      setStatus('Ready to taxi.');
+      addLog('Cabin guidance online.');
+
+      if (el.themeToggle) el.themeToggle.addEventListener('click', () => applyTheme(state.theme === 'dark' ? 'light' : 'dark'));
+      if (el.boardBtn) el.boardBtn.addEventListener('click', onBoard);
+      if (el.emergencyBtn) el.emergencyBtn.addEventListener('click', onEmergencyStop);
+      if (el.saveConfigBtn) el.saveConfigBtn.addEventListener('click', saveEngineerConfig);
+      if (el.targetRow) el.targetRow.addEventListener('keydown', (event) => { if (event.key === 'Enter') onBoard(); });
+      if (el.engineRowSpacing) el.engineRowSpacing.addEventListener('keydown', (event) => { if (event.key === 'Enter') saveEngineerConfig(); });
+      if (el.enginePwm) el.enginePwm.addEventListener('keydown', (event) => { if (event.key === 'Enter') saveEngineerConfig(); });
+      if (el.engineSpeed) el.engineSpeed.addEventListener('keydown', (event) => { if (event.key === 'Enter') saveEngineerConfig(); });
+
+      loadConfig();
+      window.addEventListener("resize", () => paintMap(), { passive: true });
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") onEmergencyStop();
+      });
+
+      (function connectWS() {
+        const ws = new WebSocket(`ws://${location.host}/ws`);
+        ws.onopen = () => {
+          if (el.connectionBadge) el.connectionBadge.querySelector(".label").textContent = "live";
+          addLog("WebSocket connected.");
+        };
+        ws.onmessage = (e) => {
+          addLog("SERIAL: " + e.data);
+          setStatus(e.data);
+        };
+        ws.onclose = () => {
+          if (el.connectionBadge) el.connectionBadge.querySelector(".label").textContent = "reconnecting…";
+          addLog("WS closed — reconnecting…");
+          setTimeout(connectWS, 800);
+        };
+      })();
+    }());
+  </script>
+</body>
+</html>

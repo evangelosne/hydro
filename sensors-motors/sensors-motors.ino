@@ -7,7 +7,7 @@
 //   STOP
 //
 // Example:
-//   TRIP F 170 3000 10000 B 3000
+//   TRIP F 245 3000 10000 B 3000
 //
 // Behavior:
 //   1. Move outward
@@ -38,8 +38,8 @@ const int TRIG = 11;
 const int ECHO = 12;
 
 // ---- Safety thresholds ----
-const long STOP_CM = 8;
-const long RESUME_CM = STOP_CM + 3;
+const long STOP_CM = 40;
+const long RESUME_CM = STOP_CM + 5;
 const unsigned long SENSOR_PERIOD_MS = 50;
 
 // ---- Trip phases ----
